@@ -1,0 +1,35 @@
+name: Release
+
+# Publishing a GitHub release builds the bridge for each architecture and
+# attaches it, so install.sh works without a Rust toolchain.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # Ubuntu 22.04's glibc keeps the binaries running on older distributions.
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - name: Package
+        run: |
+          strip target/release/soloist-mpris
+          tar -czf soloist-mpris-${{ matrix.arch }}-linux.tar.gz -C target/release soloist-mpris
+          sha256sum soloist-mpris-${{ matrix.arch }}-linux.tar.gz > soloist-mpris-${{ matrix.arch }}-linux.tar.gz.sha256
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" soloist-mpris-${{ matrix.arch }}-linux.tar.gz* --clobber

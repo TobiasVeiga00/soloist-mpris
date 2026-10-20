@@ -1,5 +1,9 @@
 # soloist-mpris
 
+[![CI](https://github.com/TobiasVeiga00/soloist-mpris/actions/workflows/ci.yml/badge.svg)](https://github.com/TobiasVeiga00/soloist-mpris/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/TobiasVeiga00/soloist-mpris)](https://github.com/TobiasVeiga00/soloist-mpris/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Spotify on Linux in about 65 MB of RAM, with your bar, media keys and `playerctl` working.**
 
 Spotify's desktop app is a whole Chromium browser running one web page. In
@@ -60,7 +64,8 @@ Once music plays, everything else comes from your desktop: keys, bar, `playerctl
 - Linux on x86_64, arm64 or arm32, with a systemd user session
 - PipeWire or PulseAudio
 - Spotify **Premium** (Soloist needs it to set up)
-- Rust (`cargo`), `curl` and `tar` to install
+- `curl` and `tar`. Rust is optional: without it, the installer downloads a
+  prebuilt bridge for x86_64 or arm64 (arm32 needs Rust to build it)
 
 ## Install
 
@@ -70,7 +75,7 @@ cd soloist-mpris
 ./install.sh
 ```
 
-The script builds the bridge, downloads Soloist from Spotify, installs three
+The script installs the bridge, downloads Soloist from Spotify, sets up the
 user services and asks for your **Soloist API key**. To get one, open the
 [Spotify for Developers dashboard](https://developer.spotify.com/dashboard),
 go to the **Spotify Soloist API Key** page, accept the terms and generate a

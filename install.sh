@@ -1,9 +1,11 @@
 #!/bin/bash
 # install.sh: set up Spotify Soloist with soloist-mpris for this user.
 #
-#   ./install.sh               build, download Soloist, ask for the API key, start
+#   ./install.sh               install the bridge, download Soloist, ask for the API key, start
 #   ./install.sh --uninstall   stop and remove everything this script installed
 #
+# With Rust installed the bridge is built from this checkout; without it, the
+# prebuilt binary for this architecture comes from the latest GitHub release.
 # Everything goes under your home directory; nothing needs root.
 set -euo pipefail
 
@@ -24,12 +26,30 @@ if [[ ${1:-} == --uninstall ]]; then
   exit 0
 fi
 
-for tool in cargo curl tar systemctl; do
+for tool in curl tar systemctl; do
   command -v "$tool" >/dev/null || { echo "install.sh: $tool is required" >&2; exit 1; }
 done
 
-say "1/4 Building soloist-mpris"
-cargo install --locked --quiet --force --path "$here" --root "$HOME/.local"
+if command -v cargo >/dev/null; then
+  say "1/4 Building soloist-mpris"
+  cargo install --locked --quiet --force --path "$here" --root "$HOME/.local"
+else
+  arch=$(uname -m)
+  case $arch in
+    x86_64 | aarch64) ;;
+    *) echo "install.sh: no prebuilt soloist-mpris for $arch; install Rust (https://rustup.rs) and run again" >&2; exit 1 ;;
+  esac
+  say "1/4 Downloading soloist-mpris ($arch)"
+  release="https://github.com/TobiasVeiga00/soloist-mpris/releases/latest/download"
+  archive="soloist-mpris-$arch-linux.tar.gz"
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  curl --fail --location --silent --show-error -o "$work/$archive" "$release/$archive"
+  curl --fail --location --silent --show-error -o "$work/$archive.sha256" "$release/$archive.sha256"
+  (cd "$work" && sha256sum --check --quiet "$archive.sha256")
+  tar -xzf "$work/$archive" -C "$work" soloist-mpris
+  install -Dm 755 "$work/soloist-mpris" "$bin/soloist-mpris"
+fi
 
 say "2/4 Downloading Spotify Soloist from Spotify"
 install -Dm 755 "$here/packaging/soloist-update" "$bin/soloist-update"
