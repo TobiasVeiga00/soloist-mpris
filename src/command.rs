@@ -36,6 +36,10 @@ pub fn commands(request: Request, state: &State, now_ms: i64) -> Vec<Value> {
     };
     let set = |name: &str, enabled: bool| json!({ "type": "command", "command": name, "enabled": enabled });
     match request {
+        // Another device has playback: take it back before resuming.
+        Request::Play | Request::PlayPause if state.inactive => {
+            vec![command("activate"), command("play")]
+        }
         Request::Play => vec![command("play")],
         Request::Pause | Request::Stop => vec![command("pause")],
         Request::PlayPause if state.status == Status::Playing => vec![command("pause")],
@@ -187,6 +191,16 @@ mod tests {
                 set("set_repeat_track", true)
             ]
         );
+    }
+
+    #[test]
+    fn playing_takes_playback_back_from_another_device() {
+        let mut state = playing();
+        state.inactive = true;
+        state.status = Status::Stopped;
+        let back = vec![command("activate"), command("play")];
+        assert_eq!(commands(Request::Play, &state, 0), back);
+        assert_eq!(commands(Request::PlayPause, &state, 0), back);
     }
 
     #[test]

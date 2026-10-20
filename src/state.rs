@@ -60,6 +60,8 @@ pub struct State {
     pub shuffle: bool,
     pub repeat: Repeat,
     pub actions: Actions,
+    /// Another Spotify Connect device has playback; nothing plays here.
+    pub inactive: bool,
 }
 
 /// What one event changed, so only those MPRIS properties are announced.
@@ -84,7 +86,12 @@ impl State {
         match event["type"].as_str() {
             Some("playback_state") => {
                 self.logged_in = true;
-                self.status = status(&event["status"]).unwrap_or_default();
+                self.inactive = event["is_active"].as_bool() == Some(false);
+                // An inactive device's snapshot describes playback elsewhere.
+                self.status = match self.inactive {
+                    true => Status::Stopped,
+                    false => status(&event["status"]).unwrap_or_default(),
+                };
                 self.track = track(&event["item"]);
                 self.anchor = anchor(&event["position"]).unwrap_or_default();
                 if let Some(volume) = volume(&event["volume"]) {
@@ -108,6 +115,8 @@ impl State {
                     ..none
                 }
             }
+            // While another device has playback, its status is not ours.
+            Some("playback_changed") if self.inactive => none,
             Some("playback_changed") => match status(&event["status"]) {
                 Some(status) => {
                     self.status = status;
@@ -143,6 +152,24 @@ impl State {
                         seeked: (next.position_ms - expected).abs() > SEEK_TOLERANCE_MS,
                         ..none
                     }
+                }
+                None => none,
+            },
+            Some("device_changed") => match event["is_active"].as_bool() {
+                Some(false) => {
+                    // Playback moved to another device: the last track stays
+                    // on the tile, stopped, until it comes back.
+                    self.inactive = true;
+                    self.status = Status::Stopped;
+                    Changes {
+                        status: true,
+                        ..none
+                    }
+                }
+                Some(true) => {
+                    // The playback_changed that follows says how it plays.
+                    self.inactive = false;
+                    none
                 }
                 None => none,
             },
@@ -497,6 +524,49 @@ mod tests {
             (state.logged_in, state.track.clone(), state.status),
             (false, None, Status::Stopped)
         );
+    }
+
+    #[test]
+    fn handing_playback_to_another_device_stops_it_here() {
+        let mut state = State::default();
+        state.apply(&snapshot());
+        let away =
+            json!({ "type": "device_changed", "is_active": false, "device_name": "ThinkPad" });
+        assert_eq!(
+            state.apply(&away),
+            Changes {
+                status: true,
+                ..Changes::default()
+            }
+        );
+        assert_eq!((state.inactive, state.status), (true, Status::Stopped));
+        assert!(
+            state.track.is_some(),
+            "the last track stays on the player's tile"
+        );
+
+        let remote = json!({ "type": "playback_changed", "status": "playing" });
+        assert_eq!(
+            state.apply(&remote),
+            Changes::default(),
+            "another device's playback"
+        );
+        assert_eq!(state.status, Status::Stopped);
+
+        let back =
+            json!({ "type": "device_changed", "is_active": true, "device_name": "ThinkPad" });
+        state.apply(&back);
+        state.apply(&remote);
+        assert_eq!((state.inactive, state.status), (false, Status::Playing));
+    }
+
+    #[test]
+    fn a_snapshot_of_an_inactive_device_is_stopped() {
+        let mut snapshot = snapshot();
+        snapshot["is_active"] = json!(false);
+        let mut state = State::default();
+        state.apply(&snapshot);
+        assert_eq!((state.inactive, state.status), (true, Status::Stopped));
     }
 
     #[test]
