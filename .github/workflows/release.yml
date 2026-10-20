@@ -6,8 +6,10 @@ on:
   release:
     types: [published]
 
+# Only the publish job can write to the release. The build runs every
+# dependency's build script, so it never holds a token that can.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -21,8 +23,12 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
       - run: cargo build --release --locked
       # The archive carries the service files too, so a piped install.sh
       # needs nothing else from the repository.
@@ -31,26 +37,50 @@ jobs:
           strip target/release/soloist-mpris
           tar -czf soloist-mpris-${{ matrix.arch }}-linux.tar.gz -C target/release soloist-mpris -C "$GITHUB_WORKSPACE" packaging
           sha256sum soloist-mpris-${{ matrix.arch }}-linux.tar.gz > soloist-mpris-${{ matrix.arch }}-linux.tar.gz.sha256
-      # The tag reaches the shell through the environment, never spliced into
-      # the script, so a tag name cannot inject commands.
-      - name: Attach to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-          ARCH: ${{ matrix.arch }}
-        run: gh release upload "$TAG" "soloist-mpris-$ARCH-linux.tar.gz" "soloist-mpris-$ARCH-linux.tar.gz.sha256" --clobber
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: soloist-mpris-${{ matrix.arch }}
+          path: soloist-mpris-${{ matrix.arch }}-linux.tar.gz*
+          if-no-files-found: error
 
   # The one-line install fetches the installer from the same release. It goes
   # up after every archive, so a piped install never runs before the archive
-  # it downloads is there; it still goes up when one architecture failed, so
-  # the others keep installing and that one gets the installer's clear error.
-  installer:
+  # it downloads is there. It still goes up when one architecture failed to
+  # build or attaching the archives failed, so whatever did go up keeps
+  # installing and a missing archive gets the installer's clear error.
+  publish:
     needs: build
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Whatever architectures built. download-artifact does not fail when the
+      # pattern matches nothing; the next step handles that case.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: soloist-mpris-*
+          path: dist
+          merge-multiple: true
+      # The tag reaches the shell through the environment, never spliced into
+      # the script, so a tag name cannot inject commands.
+      - name: Attach the archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          shopt -s nullglob
+          archives=(dist/*)
+          if ((${#archives[@]} == 0)); then
+            echo "::warning::No architecture built; only the installer goes up"
+            exit 0
+          fi
+          gh release upload "$TAG" "${archives[@]}" --clobber
       - name: Attach the installer
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}

@@ -21,7 +21,9 @@ url="https://soloist-builds.spotifycdn.com/soloist_release_${arch}.tar.gz"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-curl --fail --location --silent --show-error -o "$work/soloist.tar.gz" "$url"
+# https only, also after a redirect.
+curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' \
+  -o "$work/soloist.tar.gz" "$url"
 tar -xzf "$work/soloist.tar.gz" -C "$work" soloist
 
 new=$("$work/soloist" --version)

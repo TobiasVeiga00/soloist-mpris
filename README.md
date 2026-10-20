@@ -141,6 +141,9 @@ To change the name phones see, add `SOLOIST_DEVICE_NAME=Living room` to
 - **Spotifast shows "Nothing playing" while music plays.** In Spotifast's
   Settings, under Account, choose **Authorize your personal app** again.
 
+Sharing output to get help? Remove your key first: Soloist only takes it on
+its command line, so `systemctl --user status soloist` and `ps` show it.
+
 ## Uninstall
 
 ```sh
