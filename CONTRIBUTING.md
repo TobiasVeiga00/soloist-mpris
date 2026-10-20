@@ -20,7 +20,8 @@ Open an issue before a large change so we can agree on the approach.
 cargo test                                   # unit tests, no Soloist needed
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
-bash -n install.sh packaging/soloist-update
+bash -n install.sh packaging/soloist-update bench/measure.sh
+shellcheck install.sh packaging/soloist-update bench/measure.sh
 ```
 
 The logic lives in two pure modules with their tests:
