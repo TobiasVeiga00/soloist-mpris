@@ -22,7 +22,10 @@ jobs:
   lines:
     runs-on: ubuntu-latest
     steps:
+      # A binary from outside runs here, so the token does not stay in .git.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Download Soloist from Spotify
         env:
           SOLOIST_BIN: ${{ runner.temp }}/soloist
