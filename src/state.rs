@@ -60,6 +60,8 @@ pub struct State {
     pub shuffle: bool,
     pub repeat: Repeat,
     pub actions: Actions,
+    /// Another Spotify Connect device has playback; nothing plays here.
+    pub inactive: bool,
 }
 
 /// What one event changed, so only those MPRIS properties are announced.
@@ -72,21 +74,40 @@ pub struct Changes {
     pub actions: bool,
     /// The position jumped instead of moving on at its speed.
     pub seeked: bool,
+    /// The state may be stale: ask Soloist for a fresh snapshot (`get_state`).
+    pub refresh: bool,
 }
 
 /// A position that drifts less than this from where it should be is not a seek.
 const SEEK_TOLERANCE_MS: i64 = 1000;
 
 impl State {
-    /// Applies one server message and says what it changed.
+    /// [`State::apply_at`] at the time of the latest position anchor, so
+    /// tests read without a clock; the bridge passes the wall clock.
+    #[cfg(test)]
     pub fn apply(&mut self, event: &Value) -> Changes {
+        let now_ms = self.anchor.timestamp_ms;
+        self.apply_at(event, now_ms)
+    }
+
+    /// Applies one server message received at `now_ms` (Unix epoch ms) and
+    /// says what it changed.
+    pub fn apply_at(&mut self, event: &Value, now_ms: i64) -> Changes {
         let none = Changes::default();
         match event["type"].as_str() {
             Some("playback_state") => {
                 self.logged_in = true;
-                self.status = status(&event["status"]).unwrap_or_default();
+                self.inactive = event["is_active"].as_bool() == Some(false);
+                // An inactive device's snapshot describes playback elsewhere.
+                self.status = match self.inactive {
+                    true => Status::Stopped,
+                    false => status(&event["status"]).unwrap_or_default(),
+                };
                 self.track = track(&event["item"]);
                 self.anchor = anchor(&event["position"]).unwrap_or_default();
+                if self.inactive {
+                    self.freeze(now_ms);
+                }
                 if let Some(volume) = volume(&event["volume"]) {
                     self.volume = volume;
                 }
@@ -99,6 +120,7 @@ impl State {
                     options: true,
                     actions: true,
                     seeked: true,
+                    refresh: false,
                 }
             }
             Some("track_changed") => {
@@ -108,6 +130,8 @@ impl State {
                     ..none
                 }
             }
+            // While another device has playback, its status is not ours.
+            Some("playback_changed") if self.inactive => none,
             Some("playback_changed") => match status(&event["status"]) {
                 Some(status) => {
                     self.status = status;
@@ -135,12 +159,37 @@ impl State {
                     ..none
                 }
             }
+            // Another device's position is not ours either.
+            Some("position_sync") if self.inactive => none,
             Some("position_sync") => match anchor(&event["position"]) {
                 Some(next) => {
                     let expected = self.position_ms(next.timestamp_ms);
                     self.anchor = next;
                     Changes {
                         seeked: (next.position_ms - expected).abs() > SEEK_TOLERANCE_MS,
+                        ..none
+                    }
+                }
+                None => none,
+            },
+            Some("device_changed") => match event["is_active"].as_bool() {
+                Some(false) => {
+                    // Playback moved to another device: the last track stays
+                    // on the tile, stopped, until it comes back.
+                    self.inactive = true;
+                    self.status = Status::Stopped;
+                    self.freeze(now_ms);
+                    Changes {
+                        status: true,
+                        ..none
+                    }
+                }
+                Some(true) => {
+                    // Soloist does not promise a playback_changed after
+                    // this, so the bridge asks for a fresh snapshot.
+                    self.inactive = false;
+                    Changes {
+                        refresh: true,
                         ..none
                     }
                 }
@@ -182,6 +231,15 @@ impl State {
             Some(duration) => position.min(duration),
             None => position,
         }
+    }
+
+    /// Holds the position where it is at `now_ms`.
+    fn freeze(&mut self, now_ms: i64) {
+        self.anchor = Anchor {
+            position_ms: self.position_ms(now_ms),
+            timestamp_ms: now_ms,
+            speed: 0.0,
+        };
     }
 
     fn apply_options(&mut self, options: &Value) {
@@ -350,7 +408,8 @@ mod tests {
                 volume: true,
                 options: true,
                 actions: true,
-                seeked: true
+                seeked: true,
+                refresh: false
             }
         );
         assert_eq!(state.status, Status::Playing);
@@ -497,6 +556,88 @@ mod tests {
             (state.logged_in, state.track.clone(), state.status),
             (false, None, Status::Stopped)
         );
+    }
+
+    #[test]
+    fn handing_playback_to_another_device_stops_it_here() {
+        let mut state = State::default();
+        state.apply(&snapshot());
+        let away =
+            json!({ "type": "device_changed", "is_active": false, "device_name": "ThinkPad" });
+        assert_eq!(
+            state.apply(&away),
+            Changes {
+                status: true,
+                ..Changes::default()
+            }
+        );
+        assert_eq!((state.inactive, state.status), (true, Status::Stopped));
+        assert!(
+            state.track.is_some(),
+            "the last track stays on the player's tile"
+        );
+
+        let remote = json!({ "type": "playback_changed", "status": "playing" });
+        assert_eq!(
+            state.apply(&remote),
+            Changes::default(),
+            "another device's playback"
+        );
+        assert_eq!(state.status, Status::Stopped);
+
+        let back =
+            json!({ "type": "device_changed", "is_active": true, "device_name": "ThinkPad" });
+        state.apply(&back);
+        state.apply(&remote);
+        assert_eq!((state.inactive, state.status), (false, Status::Playing));
+    }
+
+    #[test]
+    fn handing_playback_away_freezes_the_position() {
+        let mut state = State::default();
+        state.apply(&snapshot());
+        let away =
+            json!({ "type": "device_changed", "is_active": false, "device_name": "ThinkPad" });
+        state.apply_at(&away, 1_003_000);
+        assert_eq!(
+            state.position_ms(1_100_000),
+            48000,
+            "held where playback left"
+        );
+        let elsewhere = json!({ "type": "position_sync", "position": { "position_ms": 90000, "timestamp_ms": 1_010_000, "speed": 1.0 } });
+        assert_eq!(state.apply_at(&elsewhere, 1_010_000), Changes::default());
+        assert_eq!(
+            state.position_ms(1_100_000),
+            48000,
+            "another device's position"
+        );
+    }
+
+    #[test]
+    fn taking_playback_back_asks_for_a_fresh_snapshot() {
+        let mut state = State::default();
+        state.apply(&snapshot());
+        state.apply(
+            &json!({ "type": "device_changed", "is_active": false, "device_name": "ThinkPad" }),
+        );
+        let back =
+            json!({ "type": "device_changed", "is_active": true, "device_name": "ThinkPad" });
+        assert_eq!(
+            state.apply(&back),
+            Changes {
+                refresh: true,
+                ..Changes::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_snapshot_of_an_inactive_device_is_stopped() {
+        let mut snapshot = snapshot();
+        snapshot["is_active"] = json!(false);
+        let mut state = State::default();
+        state.apply(&snapshot);
+        assert_eq!((state.inactive, state.status), (true, Status::Stopped));
     }
 
     #[test]

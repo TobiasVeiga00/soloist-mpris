@@ -360,7 +360,13 @@ async fn follow(server: &Server<Bridge>, url: &str, commands: &mut mpsc::Unbound
                 if event["type"] == "error" {
                     eprintln!("soloist: {}", event["message"]);
                 }
-                let changes = server.imp().state().apply(&event);
+                let changes = server.imp().state().apply_at(&event, now_ms());
+                if changes.refresh {
+                    let get_state = serde_json::json!({ "type": "command", "command": "get_state" });
+                    if sink.send(Message::Text(get_state.to_string().into())).await.is_err() {
+                        break;
+                    }
+                }
                 if let Err(error) = announce(server, changes).await {
                     eprintln!("D-Bus: {error}");
                 }
