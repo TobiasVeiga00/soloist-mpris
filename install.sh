@@ -147,7 +147,7 @@ since=$(date +%s)
 # Soloist either restores a saved login or says it waits for one; the
 # network wait before it starts can take a while on a fresh boot.
 for ((i = 0; i < 150; i++)); do
-  logged_in || logged_since 'waiting for login' || key_rejected && break
+  if logged_in || logged_since 'waiting for login' || key_rejected; then break; fi
   sleep 1
 done
 if logged_in; then
@@ -209,7 +209,7 @@ while :; do
       say "Paired. \"$name\" is ready in every Spotify app, and your media keys and bar control it."
       exit 0
     fi
-    if key_rejected "$since" && ((attempts < 2)); then
+    if key_rejected && ((attempts < 2)); then
       attempts=$((attempts + 1))
       note "Spotify rejected the API key."
       ask_key
