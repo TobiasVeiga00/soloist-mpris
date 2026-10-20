@@ -31,6 +31,10 @@ This kit fixes that. It installs Soloist, keeps it updated, and adds
 - **Official playback.** Soloist is Spotify's own player, so it is not affected
   by the [audio key refusals](https://github.com/librespot-org/librespot/issues/1649)
   that stop librespot-based clients on many accounts.
+- **Restarts do not stop the music.** When Soloist restarts while it is
+  playing (a weekly update, a reinstall), the bridge takes playback back
+  within seconds. After a reboot, or when another device had the music, it
+  leaves things as they are.
 - **No expiry surprises.** Soloist builds stop working after 90 days, so a
   weekly timer fetches the current one from Spotify.
 
