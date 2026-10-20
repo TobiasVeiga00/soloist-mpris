@@ -50,9 +50,18 @@ pub fn commands(request: Request, state: &State, now_ms: i64) -> Vec<Value> {
         }
         Request::Shuffle(enabled) => vec![set("set_shuffle", enabled)],
         // Two commands, in the order Soloist's reference gives for each mode.
-        Request::Repeat(Repeat::Off) => vec![set("set_repeat_track", false), set("set_repeat_context", false)],
-        Request::Repeat(Repeat::Context) => vec![set("set_repeat_track", false), set("set_repeat_context", true)],
-        Request::Repeat(Repeat::Track) => vec![set("set_repeat_context", false), set("set_repeat_track", true)],
+        Request::Repeat(Repeat::Off) => vec![
+            set("set_repeat_track", false),
+            set("set_repeat_context", false),
+        ],
+        Request::Repeat(Repeat::Context) => vec![
+            set("set_repeat_track", false),
+            set("set_repeat_context", true),
+        ],
+        Request::Repeat(Repeat::Track) => vec![
+            set("set_repeat_context", false),
+            set("set_repeat_track", true),
+        ],
     }
 }
 
@@ -73,8 +82,15 @@ mod tests {
         State {
             logged_in: true,
             status: Status::Playing,
-            track: Some(Track { duration_ms: Some(200_000), ..Track::default() }),
-            anchor: Anchor { position_ms: 60_000, timestamp_ms: 0, speed: 1.0 },
+            track: Some(Track {
+                duration_ms: Some(200_000),
+                ..Track::default()
+            }),
+            anchor: Anchor {
+                position_ms: 60_000,
+                timestamp_ms: 0,
+                speed: 1.0,
+            },
             ..State::default()
         }
     }
@@ -85,34 +101,58 @@ mod tests {
         assert_eq!(commands(Request::Play, &state, 0), vec![command("play")]);
         assert_eq!(commands(Request::Pause, &state, 0), vec![command("pause")]);
         assert_eq!(commands(Request::Stop, &state, 0), vec![command("pause")]);
-        assert_eq!(commands(Request::Next, &state, 0), vec![command("skip_next")]);
-        assert_eq!(commands(Request::Previous, &state, 0), vec![command("skip_prev")]);
+        assert_eq!(
+            commands(Request::Next, &state, 0),
+            vec![command("skip_next")]
+        );
+        assert_eq!(
+            commands(Request::Previous, &state, 0),
+            vec![command("skip_prev")]
+        );
     }
 
     #[test]
     fn play_pause_follows_the_status() {
         let mut state = playing();
-        assert_eq!(commands(Request::PlayPause, &state, 0), vec![command("pause")]);
+        assert_eq!(
+            commands(Request::PlayPause, &state, 0),
+            vec![command("pause")]
+        );
         state.status = Status::Paused;
-        assert_eq!(commands(Request::PlayPause, &state, 0), vec![command("play")]);
+        assert_eq!(
+            commands(Request::PlayPause, &state, 0),
+            vec![command("play")]
+        );
     }
 
     #[test]
     fn seeking_is_relative_to_the_live_position_and_clamped() {
         let state = playing();
         let seek = |ms: i64| json!({ "type": "command", "command": "seek", "position_ms": ms });
-        assert_eq!(commands(Request::SeekBy(10_000), &state, 5_000), vec![seek(75_000)]);
+        assert_eq!(
+            commands(Request::SeekBy(10_000), &state, 5_000),
+            vec![seek(75_000)]
+        );
         assert_eq!(commands(Request::SeekBy(-90_000), &state, 0), vec![seek(0)]);
-        assert_eq!(commands(Request::SeekTo(30_000), &state, 0), vec![seek(30_000)]);
+        assert_eq!(
+            commands(Request::SeekTo(30_000), &state, 0),
+            vec![seek(30_000)]
+        );
         // MPRIS: seeking past the end acts like Next.
-        assert_eq!(commands(Request::SeekBy(500_000), &state, 0), vec![command("skip_next")]);
+        assert_eq!(
+            commands(Request::SeekBy(500_000), &state, 0),
+            vec![command("skip_next")]
+        );
     }
 
     #[test]
     fn volume_is_scaled_to_a_percentage() {
         let state = playing();
         let volume = |v: u64| json!({ "type": "command", "command": "set_volume", "volume": v });
-        assert_eq!(commands(Request::Volume(0.426), &state, 0), vec![volume(43)]);
+        assert_eq!(
+            commands(Request::Volume(0.426), &state, 0),
+            vec![volume(43)]
+        );
         assert_eq!(commands(Request::Volume(1.7), &state, 0), vec![volume(100)]);
         assert_eq!(commands(Request::Volume(-0.2), &state, 0), vec![volume(0)]);
     }
@@ -120,19 +160,32 @@ mod tests {
     #[test]
     fn shuffle_and_repeat_use_the_documented_command_pairs() {
         let state = playing();
-        let set = |name: &str, on: bool| json!({ "type": "command", "command": name, "enabled": on });
-        assert_eq!(commands(Request::Shuffle(true), &state, 0), vec![set("set_shuffle", true)]);
+        let set =
+            |name: &str, on: bool| json!({ "type": "command", "command": name, "enabled": on });
+        assert_eq!(
+            commands(Request::Shuffle(true), &state, 0),
+            vec![set("set_shuffle", true)]
+        );
         assert_eq!(
             commands(Request::Repeat(Repeat::Off), &state, 0),
-            vec![set("set_repeat_track", false), set("set_repeat_context", false)]
+            vec![
+                set("set_repeat_track", false),
+                set("set_repeat_context", false)
+            ]
         );
         assert_eq!(
             commands(Request::Repeat(Repeat::Context), &state, 0),
-            vec![set("set_repeat_track", false), set("set_repeat_context", true)]
+            vec![
+                set("set_repeat_track", false),
+                set("set_repeat_context", true)
+            ]
         );
         assert_eq!(
             commands(Request::Repeat(Repeat::Track), &state, 0),
-            vec![set("set_repeat_context", false), set("set_repeat_track", true)]
+            vec![
+                set("set_repeat_context", false),
+                set("set_repeat_track", true)
+            ]
         );
     }
 

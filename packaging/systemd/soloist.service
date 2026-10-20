@@ -1,0 +1,19 @@
+[Unit]
+Description=Spotify Soloist: this computer as a Spotify Connect speaker
+After=pipewire.service pipewire-pulse.service
+# The API key file is created by install.sh; without it there is nothing to start.
+ConditionPathExists=%h/.config/soloist/env
+
+[Service]
+# The name phones and Spotify apps list. Override it in ~/.config/soloist/env.
+Environment=SOLOIST_DEVICE_NAME=%H
+EnvironmentFile=%h/.config/soloist/env
+# --ws on loopback only: soloist-mpris talks to it, nothing else can.
+ExecStart=%h/.local/bin/soloist --device-name ${SOLOIST_DEVICE_NAME} --api-key ${SOLOIST_API_KEY} --cache-size 2048 --ws 127.0.0.1:0
+Restart=on-failure
+RestartSec=10
+# Exit code 10: the build expired; soloist-update.timer fetches a new one.
+RestartPreventExitStatus=10
+
+[Install]
+WantedBy=default.target

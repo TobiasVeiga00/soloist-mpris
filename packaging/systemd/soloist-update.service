@@ -1,0 +1,9 @@
+[Unit]
+Description=Update Spotify Soloist before its build expires
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/soloist-update
+Nice=10

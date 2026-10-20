@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::{SinkExt, StreamExt};
 use mpris_server::zbus::{self, fdo};
 use mpris_server::{
-    LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, Property, RootInterface, Server, Signal,
-    Time, TrackId, Volume,
+    LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, Property, RootInterface,
+    Server, Signal, Time, TrackId, Volume,
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -29,7 +29,9 @@ use state::{Changes, Repeat, State, Status};
 const RETRY: Duration = Duration::from_secs(2);
 
 fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// The MPRIS side: answers D-Bus reads from the shared state and turns
@@ -41,7 +43,9 @@ struct Bridge {
 
 impl Bridge {
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn send(&self, request: Request) {
@@ -79,7 +83,10 @@ fn metadata(state: &State) -> Metadata {
         .title(track.title.clone())
         .artist(track.artists.clone())
         .album(track.album.clone())
-        .url(format!("https://open.spotify.com/{}", track.uri.trim_start_matches("spotify:").replace(':', "/")));
+        .url(format!(
+            "https://open.spotify.com/{}",
+            track.uri.trim_start_matches("spotify:").replace(':', "/")
+        ));
     if let Some(art_url) = &track.art_url {
         builder = builder.art_url(art_url.clone());
     }
@@ -179,7 +186,11 @@ impl PlayerInterface for Bridge {
 
     async fn set_position(&self, track_id: TrackId, position: Time) -> fdo::Result<()> {
         // MPRIS: a position for a track that is no longer current is ignored.
-        let current = self.state().track.as_ref().map(|track| state::track_path(&track.uri));
+        let current = self
+            .state()
+            .track
+            .as_ref()
+            .map(|track| state::track_path(&track.uri));
         if current.as_deref() == Some(track_id.as_str()) {
             self.send(Request::SeekTo(position.as_millis()));
         }
@@ -187,7 +198,9 @@ impl PlayerInterface for Bridge {
     }
 
     async fn open_uri(&self, _uri: String) -> fdo::Result<()> {
-        Err(fdo::Error::NotSupported("open a song from Spotifast".to_owned()))
+        Err(fdo::Error::NotSupported(
+            "open a song from Spotifast".to_owned(),
+        ))
     }
 
     async fn playback_status(&self) -> fdo::Result<PlaybackStatus> {
@@ -303,7 +316,11 @@ async fn announce(server: &Server<Bridge>, changes: Changes) -> zbus::Result<()>
         server.properties_changed(properties).await?;
     }
     if changes.seeked {
-        server.emit(Signal::Seeked { position: Time::from_millis(state.position_ms(now_ms())) }).await?;
+        server
+            .emit(Signal::Seeked {
+                position: Time::from_millis(state.position_ms(now_ms())),
+            })
+            .await?;
     }
     Ok(())
 }
@@ -314,7 +331,9 @@ fn data_dir() -> PathBuf {
     }
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
+        });
     data_home.join("soloist")
 }
 
@@ -360,14 +379,30 @@ async fn follow(server: &Server<Bridge>, url: &str, commands: &mut mpsc::Unbound
 async fn main() -> zbus::Result<()> {
     let (sender, mut commands) = mpsc::unbounded_channel();
     let state = Arc::new(Mutex::new(State::default()));
-    let server = Server::new("soloist", Bridge { state, commands: sender }).await?;
+    let server = Server::new(
+        "soloist",
+        Bridge {
+            state,
+            commands: sender,
+        },
+    )
+    .await?;
     let dir = data_dir();
     loop {
         if let Some(url) = address(&dir).await {
             follow(&server, &url, &mut commands).await;
             // Nothing is known while Soloist is away.
             *server.imp().state() = State::default();
-            announce(&server, Changes { metadata: true, status: true, actions: true, ..Changes::default() }).await?;
+            announce(
+                &server,
+                Changes {
+                    metadata: true,
+                    status: true,
+                    actions: true,
+                    ..Changes::default()
+                },
+            )
+            .await?;
             // Commands sent while disconnected are stale by the next connection.
             while commands.try_recv().is_ok() {}
         }

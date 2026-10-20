@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Spotify Soloist update
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

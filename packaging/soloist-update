@@ -1,0 +1,38 @@
+#!/bin/bash
+# soloist-update: keep Spotify Soloist on Spotify's current build.
+#
+# Soloist builds stop working 90 days after their build date (they exit with
+# code 10), so soloist-update.timer runs this weekly. It downloads the
+# official archive for this machine, swaps the binary when the version
+# changed and restarts soloist.service if it is enabled. Spotify does not
+# allow redistributing Soloist, so every machine fetches it from Spotify.
+set -euo pipefail
+
+bin="${SOLOIST_BIN:-$HOME/.local/bin/soloist}"
+
+case $(uname -m) in
+  x86_64) arch=x86_64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  armv7l | armv7*) arch=arm32 ;;
+  *) echo "soloist-update: Soloist has no build for $(uname -m)" >&2; exit 1 ;;
+esac
+url="https://soloist-builds.spotifycdn.com/soloist_release_${arch}.tar.gz"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+curl --fail --location --silent --show-error -o "$work/soloist.tar.gz" "$url"
+tar -xzf "$work/soloist.tar.gz" -C "$work" soloist
+
+new=$("$work/soloist" --version)
+old=$("$bin" --version 2>/dev/null || true)
+if [[ $new == "$old" ]]; then
+  exit 0
+fi
+
+mkdir -p "$(dirname "$bin")"
+install -m 755 "$work/soloist" "$bin"
+echo "soloist: ${old:-not installed} -> $new"
+if systemctl --user is-enabled --quiet soloist.service 2>/dev/null; then
+  systemctl --user restart soloist.service
+fi

@@ -1,0 +1,13 @@
+[Unit]
+Description=Spotify Soloist as an MPRIS player (bars, media keys, playerctl)
+# Follows Soloist: starts and stops with it, reconnects across its restarts.
+PartOf=soloist.service
+After=soloist.service
+
+[Service]
+ExecStart=%h/.local/bin/soloist-mpris
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=soloist.service

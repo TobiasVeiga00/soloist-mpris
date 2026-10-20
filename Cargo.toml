@@ -2,6 +2,12 @@
 name = "soloist-mpris"
 version = "0.1.0"
 edition = "2024"
+description = "Spotify Soloist as an MPRIS player: bars, media keys and playerctl for Spotify's headless Linux player"
+license = "MIT"
+repository = "https://github.com/TobiasVeiga00/soloist-mpris"
+readme = "README.md"
+keywords = ["spotify", "mpris", "soloist", "linux", "media"]
+categories = ["multimedia::audio", "command-line-utilities"]
 
 [dependencies]
 futures-util = "0.3"

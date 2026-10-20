@@ -92,35 +92,57 @@ impl State {
                 }
                 self.apply_options(&event["options"]);
                 self.actions = actions(&event["available_actions"]);
-                Changes { metadata: true, status: true, volume: true, options: true, actions: true, seeked: true }
+                Changes {
+                    metadata: true,
+                    status: true,
+                    volume: true,
+                    options: true,
+                    actions: true,
+                    seeked: true,
+                }
             }
             Some("track_changed") => {
                 self.track = track(&event["item"]);
-                Changes { metadata: true, ..none }
+                Changes {
+                    metadata: true,
+                    ..none
+                }
             }
             Some("playback_changed") => match status(&event["status"]) {
                 Some(status) => {
                     self.status = status;
-                    Changes { status: true, ..none }
+                    Changes {
+                        status: true,
+                        ..none
+                    }
                 }
                 None => none,
             },
             Some("volume_changed") => match volume(&event["volume"]) {
                 Some(volume) => {
                     self.volume = volume;
-                    Changes { volume: true, ..none }
+                    Changes {
+                        volume: true,
+                        ..none
+                    }
                 }
                 None => none,
             },
             Some("options_changed") => {
                 self.apply_options(&event["options"]);
-                Changes { options: true, ..none }
+                Changes {
+                    options: true,
+                    ..none
+                }
             }
             Some("position_sync") => match anchor(&event["position"]) {
                 Some(next) => {
                     let expected = self.position_ms(next.timestamp_ms);
                     self.anchor = next;
-                    Changes { seeked: (next.position_ms - expected).abs() > SEEK_TOLERANCE_MS, ..none }
+                    Changes {
+                        seeked: (next.position_ms - expected).abs() > SEEK_TOLERANCE_MS,
+                        ..none
+                    }
                 }
                 None => none,
             },
@@ -133,7 +155,11 @@ impl State {
                 self.track = None;
                 self.status = Status::Stopped;
                 self.anchor = Anchor::default();
-                Changes { metadata: true, status: true, ..none }
+                Changes {
+                    metadata: true,
+                    status: true,
+                    ..none
+                }
             }
             _ => none,
         }
@@ -141,8 +167,16 @@ impl State {
 
     /// The playback position at `now_ms` (Unix epoch milliseconds).
     pub fn position_ms(&self, now_ms: i64) -> i64 {
-        let Anchor { position_ms, timestamp_ms, speed } = self.anchor;
-        let moved = if speed == 0.0 { 0 } else { ((now_ms - timestamp_ms) as f64 * speed) as i64 };
+        let Anchor {
+            position_ms,
+            timestamp_ms,
+            speed,
+        } = self.anchor;
+        let moved = if speed == 0.0 {
+            0
+        } else {
+            ((now_ms - timestamp_ms) as f64 * speed) as i64
+        };
         let position = (position_ms + moved).max(0);
         match self.track.as_ref().and_then(|track| track.duration_ms) {
             Some(duration) => position.min(duration),
@@ -188,7 +222,13 @@ fn anchor(value: &Value) -> Option<Anchor> {
 /// Soloist lists only the actions available now; without the list, offer all.
 fn actions(value: &Value) -> Actions {
     let Some(available) = value.as_object() else {
-        return Actions { play: true, pause: true, next: true, previous: true, seek: true };
+        return Actions {
+            play: true,
+            pause: true,
+            next: true,
+            previous: true,
+            seek: true,
+        };
     };
     Actions {
         play: available.contains_key("play"),
@@ -200,7 +240,10 @@ fn actions(value: &Value) -> Actions {
 }
 
 fn name(entity: &Value) -> String {
-    entity["decorations"]["identity"]["name"].as_str().unwrap_or_default().to_owned()
+    entity["decorations"]["identity"]["name"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn track(item: &Value) -> Option<Track> {
@@ -301,7 +344,14 @@ mod tests {
         let changes = state.apply(&snapshot());
         assert_eq!(
             changes,
-            Changes { metadata: true, status: true, volume: true, options: true, actions: true, seeked: true }
+            Changes {
+                metadata: true,
+                status: true,
+                volume: true,
+                options: true,
+                actions: true,
+                seeked: true
+            }
         );
         assert_eq!(state.status, Status::Playing);
         assert_eq!(
@@ -320,7 +370,13 @@ mod tests {
         assert_eq!(state.repeat, Repeat::Context);
         assert_eq!(
             state.actions,
-            Actions { play: false, pause: true, next: true, previous: true, seek: true }
+            Actions {
+                play: false,
+                pause: true,
+                next: true,
+                previous: true,
+                seek: true
+            }
         );
     }
 
@@ -330,23 +386,50 @@ mod tests {
         state.apply(&snapshot());
 
         let changes = state.apply(&json!({ "type": "playback_changed", "status": "paused" }));
-        assert_eq!(changes, Changes { status: true, ..Changes::default() });
+        assert_eq!(
+            changes,
+            Changes {
+                status: true,
+                ..Changes::default()
+            }
+        );
         assert_eq!(state.status, Status::Paused);
 
         let changes = state.apply(&json!({ "type": "volume_changed", "volume": 42 }));
-        assert_eq!(changes, Changes { volume: true, ..Changes::default() });
+        assert_eq!(
+            changes,
+            Changes {
+                volume: true,
+                ..Changes::default()
+            }
+        );
         assert_eq!(state.volume, 42);
 
         let options = json!({ "type": "options_changed", "options": { "shuffle": false, "repeat": "track" } });
-        assert_eq!(state.apply(&options), Changes { options: true, ..Changes::default() });
+        assert_eq!(
+            state.apply(&options),
+            Changes {
+                options: true,
+                ..Changes::default()
+            }
+        );
         assert_eq!((state.shuffle, state.repeat), (false, Repeat::Track));
 
         let mut next = entity();
         next["uri"] = json!("spotify:track:other");
         next["decorations"]["identity"]["name"] = json!("Other Song");
         let changes = state.apply(&json!({ "type": "track_changed", "item": next }));
-        assert_eq!(changes, Changes { metadata: true, ..Changes::default() });
-        assert_eq!(state.track.as_ref().map(|t| t.title.as_str()), Some("Other Song"));
+        assert_eq!(
+            changes,
+            Changes {
+                metadata: true,
+                ..Changes::default()
+            }
+        );
+        assert_eq!(
+            state.track.as_ref().map(|t| t.title.as_str()),
+            Some("Other Song")
+        );
     }
 
     #[test]
@@ -362,7 +445,8 @@ mod tests {
     fn an_empty_item_means_nothing_is_playing() {
         let mut state = State::default();
         state.apply(&snapshot());
-        let changes = state.apply(&json!({ "type": "track_changed", "item": { "uri": "", "entity_type": "" } }));
+        let changes = state
+            .apply(&json!({ "type": "track_changed", "item": { "uri": "", "entity_type": "" } }));
         assert!(changes.metadata);
         assert_eq!(state.track, None);
     }
@@ -373,10 +457,18 @@ mod tests {
         state.apply(&snapshot());
         assert_eq!(state.position_ms(1_000_000), 45000);
         assert_eq!(state.position_ms(1_002_500), 47500);
-        assert_eq!(state.position_ms(9_000_000), 210000, "never past the track's length");
+        assert_eq!(
+            state.position_ms(9_000_000),
+            210000,
+            "never past the track's length"
+        );
 
         state.apply(&json!({ "type": "position_sync", "position": { "position_ms": 50000, "timestamp_ms": 1_005_000, "speed": 0.0 } }));
-        assert_eq!(state.position_ms(1_100_000), 50000, "speed 0 holds the position");
+        assert_eq!(
+            state.position_ms(1_100_000),
+            50000,
+            "speed 0 holds the position"
+        );
     }
 
     #[test]
@@ -386,7 +478,13 @@ mod tests {
         let on_time = json!({ "type": "position_sync", "position": { "position_ms": 55000, "timestamp_ms": 1_010_000, "speed": 1.0 } });
         assert_eq!(state.apply(&on_time), Changes::default());
         let jump = json!({ "type": "position_sync", "position": { "position_ms": 120000, "timestamp_ms": 1_011_000, "speed": 1.0 } });
-        assert_eq!(state.apply(&jump), Changes { seeked: true, ..Changes::default() });
+        assert_eq!(
+            state.apply(&jump),
+            Changes {
+                seeked: true,
+                ..Changes::default()
+            }
+        );
     }
 
     #[test]
@@ -395,7 +493,10 @@ mod tests {
         state.apply(&snapshot());
         let changes = state.apply(&json!({ "type": "auth_state", "logged_in": false, "is_active": false, "device_name": "ThinkPad" }));
         assert!(changes.metadata && changes.status);
-        assert_eq!((state.logged_in, state.track.clone(), state.status), (false, None, Status::Stopped));
+        assert_eq!(
+            (state.logged_in, state.track.clone(), state.status),
+            (false, None, Status::Stopped)
+        );
     }
 
     #[test]

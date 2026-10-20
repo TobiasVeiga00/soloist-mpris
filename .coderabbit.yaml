@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "src/**/*.rs"
+      instructions: >-
+        Keep state.rs and command.rs pure (no I/O, no clock) and covered by
+        tests with JSON fixtures shaped like Soloist's WebSocket API. Flag a
+        MutexGuard held across an await, unbounded growth, and anything that
+        blocks the async runtime.
+    - path: "install.sh"
+      instructions: >-
+        Everything must stay under the user's home directory and never need
+        root. The API key must never be echoed, logged or world-readable.
+    - path: "packaging/**"
+      instructions: >-
+        Soloist is only ever downloaded from Spotify's CDN, never bundled.
+        The WebSocket must stay bound to loopback.
+chat:
+  auto_reply: true
