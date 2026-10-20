@@ -45,6 +45,9 @@ playback each, measured with [`bench/measure.sh`](bench/measure.sh):
 | Spotify desktop app, window hidden | 922 MB | 10% | 387 MB |
 | Spotify desktop app, window open | 943 MB | 27% | 387 MB |
 
+Installed size is the program files on disk (`soloist` and `soloist-mpris`
+against Spotify's install directory), caches excluded.
+
 That is **15 times less memory** and less than a third of the CPU, even when
 the official app sits hidden in the background. The desktop app is a Chromium
 browser showing Spotify's web page, spread over 9 processes.

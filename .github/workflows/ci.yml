@@ -21,6 +21,10 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: bash -n install.sh packaging/soloist-update bench/measure.sh
+      - name: Benchmark script smoke test
+        run: |
+          sleep 30 &
+          bench/measure.sh '^sleep$' 5 | grep -q 'RAM (PSS)'
 
   msrv:
     runs-on: ubuntu-latest
