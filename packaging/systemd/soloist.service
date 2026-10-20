@@ -12,7 +12,9 @@ EnvironmentFile=%h/.config/soloist/env
 # before the network is up (a user session at boot often is), it stays
 # logged out. Wait up to two minutes for Spotify to resolve, then start
 # anyway. User units cannot order after the system's network-online.target.
-ExecStartPre=/bin/sh -c 'i=0; while [ $$i -lt 60 ]; do getent ahosts apresolve.spotify.com >/dev/null 2>&1 && exit 0; i=$$((i + 1)); sleep 2; done'
+# The deadline is wall time and each lookup is capped, so a resolver that
+# hangs cannot push the wait past TimeoutStartSec.
+ExecStartPre=/bin/sh -c 'end=$$(($$(date +%%s) + 120)); while [ "$$(date +%%s)" -lt "$$end" ]; do timeout 3 getent ahosts apresolve.spotify.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
 TimeoutStartSec=3min
 # --ws on loopback only: soloist-mpris talks to it, nothing else can.
 ExecStart=%h/.local/bin/soloist --device-name ${SOLOIST_DEVICE_NAME} --api-key ${SOLOIST_API_KEY} --cache-size 2048 --ws 127.0.0.1:0
