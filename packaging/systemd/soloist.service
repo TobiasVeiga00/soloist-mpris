@@ -8,6 +8,12 @@ ConditionPathExists=%h/.config/soloist/env
 # The name phones and Spotify apps list. Override it in ~/.config/soloist/env.
 Environment=SOLOIST_DEVICE_NAME=%H
 EnvironmentFile=%h/.config/soloist/env
+# Soloist restores its login once, at start, and does not retry: started
+# before the network is up (a user session at boot often is), it stays
+# logged out. Wait up to two minutes for Spotify to resolve, then start
+# anyway. User units cannot order after the system's network-online.target.
+ExecStartPre=/bin/sh -c 'i=0; while [ $$i -lt 60 ]; do getent ahosts apresolve.spotify.com >/dev/null 2>&1 && exit 0; i=$$((i + 1)); sleep 2; done'
+TimeoutStartSec=3min
 # --ws on loopback only: soloist-mpris talks to it, nothing else can.
 ExecStart=%h/.local/bin/soloist --device-name ${SOLOIST_DEVICE_NAME} --api-key ${SOLOIST_API_KEY} --cache-size 2048 --ws 127.0.0.1:0
 Restart=on-failure
