@@ -13,7 +13,8 @@
 # Environment:
 #   SOLOIST_API_KEY=...       use this key and ask nothing (unattended setup)
 #   SOLOIST_DEVICE_NAME=...   the name phones show (default: the hostname)
-#   SOLOIST_MPRIS_RELEASE_URL where to download the bridge (default: latest release)
+#   SOLOIST_MPRIS_RELEASE_URL where to download the bridge, https:// or file://
+#                             (default: latest release)
 set -euo pipefail
 
 repo=TobiasVeiga00/soloist-mpris
@@ -201,8 +202,13 @@ close_firewall() { # [--left-over]: closes what this run opened, or what a kille
   fi
 }
 
+# Plain http is refused, also after a redirect, so nobody on the network can
+# swap what gets installed; file:// is for a release on this machine.
 download() { # file of the release, into the work directory
-  curl --fail --location --silent --show-error -o "$work/$1" "$release/$1" ||
+  [[ $release == https://* || $release == file://* ]] ||
+    die "SOLOIST_MPRIS_RELEASE_URL must start with https:// or file://, not $release"
+  curl --fail --location --silent --show-error --proto '=https,file' --proto-redir '=https' \
+    -o "$work/$1" "$release/$1" ||
     die "could not download $1 from $release (see the error above); if that release came out in the last few minutes, its files may still be uploading, so try again in a few minutes"
 }
 

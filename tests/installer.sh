@@ -350,6 +350,18 @@ run_detached
 expect_in "$out" "could not download $archive"
 expect_in "$out" "try again in a few minutes"
 
+scenario "an http release URL is refused before anything is downloaded"
+with_key
+touch "$FAKE/paired"
+# Nothing listens on the discard port, so only a check made before any
+# download can fail with the right message.
+export SOLOIST_MPRIS_RELEASE_URL="http://127.0.0.1:9"
+run_detached
+((status == 1)) || fail "exit $status"
+expect_in "$out" "SOLOIST_MPRIS_RELEASE_URL must start with https:// or file://"
+expect_not_in "$out" "try again in a few minutes" "the refusal reads like a release still uploading"
+[[ ! -e $HOME/.local/bin/soloist-mpris ]] || fail "the bridge was installed"
+
 if ((failures)); then
   echo "$failures failed"
   exit 1
