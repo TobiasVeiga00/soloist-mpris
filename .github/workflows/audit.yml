@@ -1,0 +1,33 @@
+name: Dependency audit
+
+# Checks Cargo.lock against the RustSec advisory database (settings in
+# deny.toml). Advisories are published at any time, so this also runs each
+# week: a new one fails here even when nobody touched the dependencies.
+on:
+  schedule:
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+  # Only a pull request that changes the dependencies or this check runs it,
+  # so an advisory published today does not block an unrelated change.
+  pull_request:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - deny.toml
+      - .github/workflows/audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      # A third-party action runs here, so the token does not stay in .git.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          command-arguments: advisories

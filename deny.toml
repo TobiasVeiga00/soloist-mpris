@@ -1,0 +1,13 @@
+# cargo-deny settings. CI runs only `cargo deny check advisories`
+# (.github/workflows/audit.yml), against the RustSec advisory database.
+
+[advisories]
+# zbus 6 took these crates in, so they are flagged unmaintained; none of them
+# has a vulnerability. mpris-server 0.10, its newest release, still needs
+# zbus 5. Drop these once mpris-server moves to zbus 6: cargo-deny warns when
+# an ignored advisory no longer matches anything.
+ignore = [
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6, which mpris-server 0.10 does not use yet" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6, which mpris-server 0.10 does not use yet" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6, which mpris-server 0.10 does not use yet" },
+]
