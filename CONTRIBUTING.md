@@ -24,10 +24,11 @@ bash -n install.sh packaging/soloist-update bench/measure.sh
 shellcheck install.sh packaging/soloist-update bench/measure.sh
 ```
 
-The logic lives in two pure modules with their tests:
+The logic lives in three pure modules with their tests:
 
 - `src/state.rs` turns Soloist's WebSocket events into playback state.
 - `src/command.rs` turns MPRIS requests into Soloist commands.
+- `src/resume.rs` decides when to take playback back after Soloist restarts.
 
 `src/main.rs` only wires them to the socket and to D-Bus. When Soloist sends a
 message you have not handled, add it as a JSON fixture in `state.rs` tests,

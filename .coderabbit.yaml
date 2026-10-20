@@ -12,7 +12,7 @@ reviews:
   path_instructions:
     - path: "src/**/*.rs"
       instructions: >-
-        Keep state.rs and command.rs pure (no I/O, no clock) and covered by
+        Keep state.rs, command.rs and resume.rs pure (no I/O, no clock) and covered by
         tests with JSON fixtures shaped like Soloist's WebSocket API. Flag a
         MutexGuard held across an await, unbounded growth, and anything that
         blocks the async runtime.
