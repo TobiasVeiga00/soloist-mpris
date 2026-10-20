@@ -24,12 +24,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked
+      # The archive carries the service files too, so a piped install.sh
+      # needs nothing else from the repository.
       - name: Package
         run: |
           strip target/release/soloist-mpris
-          tar -czf soloist-mpris-${{ matrix.arch }}-linux.tar.gz -C target/release soloist-mpris
+          tar -czf soloist-mpris-${{ matrix.arch }}-linux.tar.gz -C target/release soloist-mpris -C "$GITHUB_WORKSPACE" packaging
           sha256sum soloist-mpris-${{ matrix.arch }}-linux.tar.gz > soloist-mpris-${{ matrix.arch }}-linux.tar.gz.sha256
+      # The tag reaches the shell through the environment, never spliced into
+      # the script, so a tag name cannot inject commands.
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" soloist-mpris-${{ matrix.arch }}-linux.tar.gz* --clobber
+          TAG: ${{ github.event.release.tag_name }}
+          ARCH: ${{ matrix.arch }}
+        run: gh release upload "$TAG" "soloist-mpris-$ARCH-linux.tar.gz" "soloist-mpris-$ARCH-linux.tar.gz.sha256" --clobber
+      # The one-line install fetches the installer from the same release.
+      - name: Attach the installer
+        if: matrix.arch == 'x86_64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" install.sh --clobber

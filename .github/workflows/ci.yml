@@ -21,6 +21,7 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: bash -n install.sh packaging/soloist-update bench/measure.sh
+      - run: shellcheck install.sh packaging/soloist-update bench/measure.sh
       - name: Benchmark script smoke test
         run: |
           sleep 30 &

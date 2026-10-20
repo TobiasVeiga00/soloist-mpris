@@ -76,37 +76,41 @@ Once music plays, everything else comes from your desktop: keys, bar, `playerctl
 
 ## Requirements
 
-- Linux on x86_64, arm64 or arm32, with a systemd user session
-- PipeWire or PulseAudio
-- Spotify **Premium** (Soloist needs it to set up)
-- `curl` and `tar`. Rust is optional: without it, the installer downloads a
-  prebuilt bridge for x86_64 or arm64 (arm32 needs Rust to build it)
+- Linux on x86_64 or arm64 (arm32 works from a clone with Rust), with a
+  systemd user session and PipeWire or PulseAudio. Soloist is Linux-only:
+  Spotify publishes no Windows or macOS build.
+- A Spotify **Premium** account to create the Soloist API key. Once it runs,
+  anyone in the house can play on it, Free accounts included.
 
 ## Install
 
 ```sh
-git clone https://github.com/TobiasVeiga00/soloist-mpris
-cd soloist-mpris
-./install.sh
+curl -fsSL https://github.com/TobiasVeiga00/soloist-mpris/releases/latest/download/install.sh | bash
 ```
 
-The script installs the bridge, downloads Soloist from Spotify, sets up the
-user services and asks for your **Soloist API key**. To get one, open the
-[Spotify for Developers dashboard](https://developer.spotify.com/dashboard),
-go to the **Spotify Soloist API Key** page, accept the terms and generate a
-key. The key is stored in `~/.config/soloist/env`, readable only by you.
+That is the whole setup. The installer:
 
-Everything goes under your home directory; nothing needs root.
+1. downloads the bridge for your machine and checks its checksum;
+2. downloads Soloist from Spotify;
+3. opens the [Spotify for Developers dashboard](https://developer.spotify.com/dashboard)
+   and asks for your key: on the **Spotify Soloist API Key** page, accept the
+   terms and generate one. It is stored in `~/.config/soloist/env`, readable
+   only by you;
+4. starts the services and waits while you pair: open Spotify on your phone,
+   **on the same network**, tap the devices icon and pick your computer. It
+   stays paired from then on.
 
-### Pair it once
+If a firewall (ufw or firewalld) would hide the computer from your phone, the
+installer offers to open it for your local network only while you pair, and
+closes it again. That is the only step that asks for `sudo`; everything else
+stays in your home directory.
 
-Open Spotify on your phone, **on the same network**, play something, tap the
-devices icon and choose your computer (its hostname). Soloist remembers the
-login, so from then on it is available from every Spotify app.
+Prefer to read it first? `curl -fsSLO https://github.com/TobiasVeiga00/soloist-mpris/releases/latest/download/install.sh`,
+read it, then `bash install.sh`. From a clone, `./install.sh` does the same and
+builds the bridge from source when Rust is installed.
 
-If it does not show up, your firewall is blocking the local discovery. Allow
-incoming `5353/udp` and the TCP port Soloist listens on (`ss -tlnp | grep soloist`)
-from your local network, pair, then remove the rules.
+Unattended setup: `SOLOIST_API_KEY=... SOLOIST_DEVICE_NAME="Living room"` before
+`bash` skips the questions; pair later from any Spotify app.
 
 ## Everyday use
 
@@ -123,7 +127,7 @@ To change the name phones see, add `SOLOIST_DEVICE_NAME=Living room` to
 ## Uninstall
 
 ```sh
-./install.sh --uninstall
+curl -fsSL https://github.com/TobiasVeiga00/soloist-mpris/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
 It keeps your key and pairing; delete `~/.config/soloist` and
