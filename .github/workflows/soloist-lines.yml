@@ -1,0 +1,41 @@
+name: Soloist lines
+
+# install.sh follows pairing through lines Soloist prints, because Soloist has
+# no status field for them. Each week this downloads Spotify's current build
+# and checks that it still prints them, so a change fails here instead of
+# quietly turning the installer's checks into timeouts.
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - install.sh
+      - packaging/soloist-update
+      - .github/workflows/soloist-lines.yml
+
+permissions:
+  contents: read
+
+jobs:
+  lines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Soloist from Spotify
+        env:
+          SOLOIST_BIN: ${{ runner.temp }}/soloist
+        run: packaging/soloist-update
+      # Keep in step with logged_in, logged_since and key_rejected in install.sh.
+      - name: Check the lines install.sh waits for
+        run: |
+          soloist="$RUNNER_TEMP/soloist"
+          "$soloist" --version
+          missing=0
+          for line in 'logged in: ' 'waiting for login' 'login failed'; do
+            if ! grep -aqF -- "$line" "$soloist"; then
+              echo "::error::Soloist no longer prints '$line'; update install.sh"
+              missing=1
+            fi
+          done
+          exit "$missing"

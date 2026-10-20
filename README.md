@@ -106,8 +106,9 @@ That is the whole setup. The installer:
 
 If a firewall (ufw or firewalld) would hide the computer from your phone, the
 installer offers to open it for your local network only while you pair, and
-closes it again. That is the only step that asks for `sudo`; everything else
-stays in your home directory.
+closes it again; if the install is cut short, the next run or the uninstall
+closes it. That is the only step that asks for `sudo`; everything else stays in
+your home directory.
 
 Prefer to read it first? `curl -fsSLO https://github.com/TobiasVeiga00/soloist-mpris/releases/latest/download/install.sh`,
 read it, then `bash install.sh`. From a clone, `./install.sh` does the same and

@@ -39,9 +39,16 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
           ARCH: ${{ matrix.arch }}
         run: gh release upload "$TAG" "soloist-mpris-$ARCH-linux.tar.gz" "soloist-mpris-$ARCH-linux.tar.gz.sha256" --clobber
-      # The one-line install fetches the installer from the same release.
+
+  # The one-line install fetches the installer from the same release. It goes
+  # up after every archive, so a piped install never runs before the archive
+  # it downloads is there.
+  installer:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Attach the installer
-        if: matrix.arch == 'x86_64'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}

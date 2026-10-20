@@ -22,6 +22,7 @@ dashboard=https://developer.spotify.com/dashboard
 bin="$HOME/.local/bin"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/soloist"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/soloist-mpris"
 unit_files=(soloist.service soloist-mpris.service soloist-update.service soloist-update.timer)
 pair_minutes=5
 # Covers the service's network wait (up to two minutes) plus Soloist's start.
@@ -65,7 +66,9 @@ ask_key() {
 }
 
 # Status checks capture output first: with pipefail, `cmd | grep -q` can fail
-# when grep stops reading early.
+# when grep stops reading early. Soloist has no status field for "waiting for
+# login" or a rejected key, so these read its lines; the Soloist lines
+# workflow checks every week that Spotify's current build still prints them.
 logged_in() {
   local status
   status=$("$bin/soloist" ctl status 2>/dev/null) || true
@@ -97,7 +100,7 @@ retry_key() {
   note "Spotify rejected the API key."
   ask_key
   local reopen=""
-  ((${#opened[@]})) && reopen=1
+  [[ -s $opened ]] && reopen=1
   close_firewall
   restart_soloist
   if [[ -n $reopen ]]; then
@@ -119,16 +122,25 @@ find_port() {
 # Discovery needs mDNS (5353/udp) and Soloist's own TCP port, from the local
 # network only. Every rule this script added is taken out again, even if a
 # later one failed; a rule that was already there is left alone.
-firewall="" subnet="" port=""
-opened=()
+#
+# Each added rule is recorded in a file (tool, firewalld zone or -, rule) so
+# that one left open by a killed installer is closed by the next run or by
+# --uninstall.
+firewall="" zone="-" dev="" subnet="" port=""
+opened="$state/firewall-rules"
 open_firewall() {
   local rules=() rule
   case $firewall in
     ufw) rules=("allow in from $subnet to any port 5353 proto udp"
                 "allow in from $subnet to any port $port proto tcp") ;;
-    firewalld) rules=("rule family=ipv4 source address=$subnet port port=5353 protocol=udp accept"
-                      "rule family=ipv4 source address=$subnet port port=$port protocol=tcp accept") ;;
+    firewalld)
+      # Rules only apply in the zone of the interface the phone talks to.
+      zone=$(sudo firewall-cmd --get-zone-of-interface="$dev" 2>/dev/null) ||
+        zone=$(sudo firewall-cmd --get-default-zone) || return 1
+      rules=("rule family=ipv4 source address=$subnet port port=5353 protocol=udp accept"
+             "rule family=ipv4 source address=$subnet port port=$port protocol=tcp accept") ;;
   esac
+  mkdir -p "$state"
   local out
   for rule in "${rules[@]}"; do
     # shellcheck disable=SC2086 # the rule is ufw's own words
@@ -137,26 +149,41 @@ open_firewall() {
         out=$(sudo ufw $rule 2>&1) || return 1
         [[ $out != *Skipping* ]] || continue ;;
       firewalld)
-        ! sudo firewall-cmd --quiet --query-rich-rule="$rule" 2>/dev/null || continue
-        sudo firewall-cmd --quiet --add-rich-rule="$rule" || return 1 ;;
+        ! sudo firewall-cmd --quiet --zone="$zone" --query-rich-rule="$rule" 2>/dev/null || continue
+        sudo firewall-cmd --quiet --zone="$zone" --add-rich-rule="$rule" || return 1 ;;
     esac
-    opened+=("$rule")
+    printf '%s\t%s\t%s\n' "$firewall" "$zone" "$rule" >>"$opened"
   done
 }
-close_firewall() {
-  ((${#opened[@]})) || return 0
-  note "Closing the firewall again."
-  local rule
-  for rule in "${opened[@]}"; do
+close_firewall() { # [message]
+  [[ -s $opened ]] || return 0
+  note "${1:-Closing the firewall again.}"
+  local tool rule_zone rule hint left=""
+  while IFS=$'\t' read -r -u 3 tool rule_zone rule; do
     # shellcheck disable=SC2086 # the rule is ufw's own words
-    case $firewall in
-      ufw) sudo ufw delete $rule >/dev/null ||
-             note "Could not remove a firewall rule; remove it with: sudo ufw delete $rule" ;;
-      firewalld) sudo firewall-cmd --quiet --remove-rich-rule="$rule" ||
-                   note "Could not remove a firewall rule; remove it with: sudo firewall-cmd --remove-rich-rule='$rule'" ;;
+    case $tool in
+      ufw)
+        if sudo ufw delete $rule >/dev/null; then continue; fi
+        hint="sudo ufw delete $rule" ;;
+      firewalld)
+        if sudo firewall-cmd --quiet --zone="$rule_zone" --remove-rich-rule="$rule"; then continue; fi
+        hint="sudo firewall-cmd --zone=$rule_zone --remove-rich-rule='$rule'" ;;
+      *) continue ;;
     esac
-  done
-  opened=()
+    note "Could not remove a firewall rule; remove it with: $hint"
+    left+="$tool"$'\t'"$rule_zone"$'\t'"$rule"$'\n'
+  done 3<"$opened"
+  # A rule that could not be removed stays recorded for the next run.
+  if [[ -n $left ]]; then
+    printf '%s' "$left" >"$opened"
+  else
+    rm -f -- "$opened"
+  fi
+}
+
+download() { # file of the release, into the work directory
+  curl --fail --location --silent --show-error -o "$work/$1" "$release/$1" ||
+    die "could not download $1 from $release; a release published in the last few minutes may still be uploading its files, so try again in a few minutes"
 }
 
 cleanup() {
@@ -171,6 +198,8 @@ main() {
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     [[ -f $here/packaging/systemd/soloist.service ]] || here=""
   fi
+
+  close_firewall "An interrupted install left the firewall open while pairing; closing it."
 
   if [[ ${1:-} == --uninstall ]]; then
     local unit
@@ -209,8 +238,8 @@ main() {
     esac
     say "1/4 Downloading soloist-mpris ($arch)"
     archive="soloist-mpris-$arch-linux.tar.gz"
-    curl --fail --location --silent --show-error -o "$work/$archive" "$release/$archive"
-    curl --fail --location --silent --show-error -o "$work/$archive.sha256" "$release/$archive.sha256"
+    download "$archive"
+    download "$archive.sha256"
     (cd "$work" && sha256sum --check --quiet "$archive.sha256") || die "checksum mismatch for $archive"
     tar -xzf "$work/$archive" -C "$work"
     install -Dm 755 "$work/soloist-mpris" "$bin/soloist-mpris"
@@ -278,7 +307,7 @@ main() {
   systemctl is-active --quiet ufw 2>/dev/null && firewall=ufw
   systemctl is-active --quiet firewalld 2>/dev/null && firewall=firewalld
   if [[ -n $firewall ]]; then
-    local dev reply
+    local reply
     dev=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}') || true
     subnet=$(ip -4 route show dev "$dev" proto kernel scope link 2>/dev/null | awk '{print $1; exit}') || true
     if [[ -n $subnet ]] && find_port; then
