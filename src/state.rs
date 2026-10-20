@@ -74,14 +74,25 @@ pub struct Changes {
     pub actions: bool,
     /// The position jumped instead of moving on at its speed.
     pub seeked: bool,
+    /// The state may be stale: ask Soloist for a fresh snapshot (`get_state`).
+    pub refresh: bool,
 }
 
 /// A position that drifts less than this from where it should be is not a seek.
 const SEEK_TOLERANCE_MS: i64 = 1000;
 
 impl State {
-    /// Applies one server message and says what it changed.
+    /// [`State::apply_at`] at the time of the latest position anchor, so
+    /// tests read without a clock; the bridge passes the wall clock.
+    #[cfg(test)]
     pub fn apply(&mut self, event: &Value) -> Changes {
+        let now_ms = self.anchor.timestamp_ms;
+        self.apply_at(event, now_ms)
+    }
+
+    /// Applies one server message received at `now_ms` (Unix epoch ms) and
+    /// says what it changed.
+    pub fn apply_at(&mut self, event: &Value, now_ms: i64) -> Changes {
         let none = Changes::default();
         match event["type"].as_str() {
             Some("playback_state") => {
@@ -94,6 +105,9 @@ impl State {
                 };
                 self.track = track(&event["item"]);
                 self.anchor = anchor(&event["position"]).unwrap_or_default();
+                if self.inactive {
+                    self.freeze(now_ms);
+                }
                 if let Some(volume) = volume(&event["volume"]) {
                     self.volume = volume;
                 }
@@ -106,6 +120,7 @@ impl State {
                     options: true,
                     actions: true,
                     seeked: true,
+                    refresh: false,
                 }
             }
             Some("track_changed") => {
@@ -144,6 +159,8 @@ impl State {
                     ..none
                 }
             }
+            // Another device's position is not ours either.
+            Some("position_sync") if self.inactive => none,
             Some("position_sync") => match anchor(&event["position"]) {
                 Some(next) => {
                     let expected = self.position_ms(next.timestamp_ms);
@@ -161,15 +178,20 @@ impl State {
                     // on the tile, stopped, until it comes back.
                     self.inactive = true;
                     self.status = Status::Stopped;
+                    self.freeze(now_ms);
                     Changes {
                         status: true,
                         ..none
                     }
                 }
                 Some(true) => {
-                    // The playback_changed that follows says how it plays.
+                    // Soloist does not promise a playback_changed after
+                    // this, so the bridge asks for a fresh snapshot.
                     self.inactive = false;
-                    none
+                    Changes {
+                        refresh: true,
+                        ..none
+                    }
                 }
                 None => none,
             },
@@ -209,6 +231,15 @@ impl State {
             Some(duration) => position.min(duration),
             None => position,
         }
+    }
+
+    /// Holds the position where it is at `now_ms`.
+    fn freeze(&mut self, now_ms: i64) {
+        self.anchor = Anchor {
+            position_ms: self.position_ms(now_ms),
+            timestamp_ms: now_ms,
+            speed: 0.0,
+        };
     }
 
     fn apply_options(&mut self, options: &Value) {
@@ -377,7 +408,8 @@ mod tests {
                 volume: true,
                 options: true,
                 actions: true,
-                seeked: true
+                seeked: true,
+                refresh: false
             }
         );
         assert_eq!(state.status, Status::Playing);
@@ -558,6 +590,45 @@ mod tests {
         state.apply(&back);
         state.apply(&remote);
         assert_eq!((state.inactive, state.status), (false, Status::Playing));
+    }
+
+    #[test]
+    fn handing_playback_away_freezes_the_position() {
+        let mut state = State::default();
+        state.apply(&snapshot());
+        let away =
+            json!({ "type": "device_changed", "is_active": false, "device_name": "ThinkPad" });
+        state.apply_at(&away, 1_003_000);
+        assert_eq!(
+            state.position_ms(1_100_000),
+            48000,
+            "held where playback left"
+        );
+        let elsewhere = json!({ "type": "position_sync", "position": { "position_ms": 90000, "timestamp_ms": 1_010_000, "speed": 1.0 } });
+        assert_eq!(state.apply_at(&elsewhere, 1_010_000), Changes::default());
+        assert_eq!(
+            state.position_ms(1_100_000),
+            48000,
+            "another device's position"
+        );
+    }
+
+    #[test]
+    fn taking_playback_back_asks_for_a_fresh_snapshot() {
+        let mut state = State::default();
+        state.apply(&snapshot());
+        state.apply(
+            &json!({ "type": "device_changed", "is_active": false, "device_name": "ThinkPad" }),
+        );
+        let back =
+            json!({ "type": "device_changed", "is_active": true, "device_name": "ThinkPad" });
+        assert_eq!(
+            state.apply(&back),
+            Changes {
+                refresh: true,
+                ..Changes::default()
+            }
+        );
     }
 
     #[test]
