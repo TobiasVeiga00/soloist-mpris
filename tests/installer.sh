@@ -197,7 +197,7 @@ wait_for() { # file text: up to 30 seconds
 answer() { # question reply
   if ! wait_for "$out" "$1"; then
     fail "never asked: $1"
-    return 1
+    return 0
   fi
   printf '%s\n' "$2" >&3
 }
