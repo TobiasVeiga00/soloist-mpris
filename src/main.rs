@@ -7,6 +7,7 @@
 //! Soloist's data directory and reconnects whenever Soloist restarts.
 
 mod command;
+mod resume;
 mod state;
 
 use std::path::PathBuf;
@@ -344,13 +345,70 @@ async fn address(dir: &std::path::Path) -> Option<String> {
     Some(format!("ws://{}:{}", addr.trim(), port.trim()))
 }
 
+/// Where the bridge keeps what this speaker was doing when it lost Soloist.
+struct Memory {
+    path: PathBuf,
+    boot_id: String,
+}
+
+impl Memory {
+    fn new() -> Self {
+        let state_home = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state")
+            });
+        let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .map(|id| id.trim().to_owned())
+            .unwrap_or_default();
+        Memory {
+            path: state_home.join("soloist-mpris/resume.json"),
+            boot_id,
+        }
+    }
+
+    /// Saves `state`, unless Soloist never said who has playback.
+    async fn save(&self, state: &State) {
+        let Some(saved) = resume::Saved::of(state, &self.boot_id, now_ms()) else {
+            return;
+        };
+        let Ok(json) = serde_json::to_vec(&saved) else {
+            return;
+        };
+        // Written aside and renamed, so a crash never leaves half a file.
+        let partial = self.path.with_extension("json.partial");
+        let written = async {
+            if let Some(parent) = self.path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::write(&partial, json).await?;
+            tokio::fs::rename(&partial, &self.path).await
+        };
+        if let Err(error) = written.await {
+            eprintln!("saving {}: {error}", self.path.display());
+        }
+    }
+
+    async fn load(&self) -> Option<resume::Saved> {
+        let json = tokio::fs::read(&self.path).await.ok()?;
+        serde_json::from_slice(&json).ok()
+    }
+}
+
 /// Follows one connection until it closes.
-async fn follow(server: &Server<Bridge>, url: &str, commands: &mut mpsc::UnboundedReceiver<Value>) {
+async fn follow(
+    server: &Server<Bridge>,
+    url: &str,
+    commands: &mut mpsc::UnboundedReceiver<Value>,
+    memory: &Memory,
+) {
     let Ok((socket, _)) = tokio_tungstenite::connect_async(url).await else {
         return;
     };
     eprintln!("connected to {url}");
     let (mut sink, mut stream) = socket.split();
+    // Decided once per connection, on its first playback snapshot.
+    let mut resume_checked = false;
     loop {
         tokio::select! {
             message = stream.next() => {
@@ -369,6 +427,20 @@ async fn follow(server: &Server<Bridge>, url: &str, commands: &mut mpsc::Unbound
                 }
                 if let Err(error) = announce(server, changes).await {
                     eprintln!("D-Bus: {error}");
+                }
+                if !resume_checked && event["type"] == "playback_state" {
+                    resume_checked = true;
+                    let saved = memory.load().await;
+                    let state = server.imp().state().clone();
+                    let take_back = resume::commands(saved.as_ref(), &state, &memory.boot_id, now_ms());
+                    if !take_back.is_empty() {
+                        eprintln!("Soloist restarted while it had playback; taking it back");
+                    }
+                    for command in take_back {
+                        if sink.send(Message::Text(command.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
             Some(command) = commands.recv() => {
@@ -393,14 +465,35 @@ async fn main() -> zbus::Result<()> {
         },
     )
     .await?;
+    let memory = Memory::new();
+    // Stopping the bridge (Soloist's restart stops it too) saves what this
+    // speaker was doing, so the next start can take playback back.
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = bridge(&server, &mut commands, &memory) => result,
+        _ = terminate.recv() => {
+            let state = server.imp().state().clone();
+            memory.save(&state).await;
+            Ok(())
+        }
+    }
+}
+
+async fn bridge(
+    server: &Server<Bridge>,
+    commands: &mut mpsc::UnboundedReceiver<Value>,
+    memory: &Memory,
+) -> zbus::Result<()> {
     let dir = data_dir();
     loop {
         if let Some(url) = address(&dir).await {
-            follow(&server, &url, &mut commands).await;
+            follow(server, &url, commands, memory).await;
+            let state = server.imp().state().clone();
+            memory.save(&state).await;
             // Nothing is known while Soloist is away.
             *server.imp().state() = State::default();
             announce(
-                &server,
+                server,
                 Changes {
                     metadata: true,
                     status: true,
