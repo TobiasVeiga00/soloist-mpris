@@ -1,6 +1,6 @@
 [package]
 name = "soloist-mpris"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 # Oldest Rust that builds it, from the dependencies (uuid needs 1.89); CI checks it.
 rust-version = "1.89"
