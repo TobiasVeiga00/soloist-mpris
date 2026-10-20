@@ -38,9 +38,11 @@ fake journalctl <<'EOF'
 cat "$FAKE/journal" 2>/dev/null || true
 EOF
 
+# With FAKE_SUDO_FAILS, as when nobody can type the password.
 fake sudo <<'EOF'
 #!/bin/bash
 echo "sudo $*" >>"$FAKE/calls"
+[[ -z ${FAKE_SUDO_FAILS:-} ]] || exit 1
 exec "$@"
 EOF
 
@@ -50,11 +52,13 @@ fake ss <<'EOF'
 echo 'LISTEN 0 4096 0.0.0.0:34323 0.0.0.0:* users:(("soloist",pid=4242,fd=9))'
 EOF
 
+# The default route goes through eth0, or FAKE_IFACE.
 fake ip <<'EOF'
 #!/bin/bash
+dev=${FAKE_IFACE:-eth0}
 case "$*" in
-  "-4 route show default") echo "default via 192.168.7.1 dev eth0 proto dhcp metric 100" ;;
-  "-4 route show dev eth0 proto kernel scope link") echo "192.168.7.0/24 proto kernel scope link src 192.168.7.20" ;;
+  "-4 route show default") echo "default via 192.168.7.1 dev $dev proto dhcp metric 100" ;;
+  "-4 route show dev $dev proto kernel scope link") echo "192.168.7.0/24 proto kernel scope link src 192.168.7.20" ;;
 esac
 EOF
 
@@ -157,7 +161,7 @@ scenario() { # name: a fresh home and fake state
   dir="$root/scenarios/${1//[^a-z0-9]/-}"
   export HOME="$dir/home" FAKE="$dir/fake"
   export SOLOIST_MPRIS_RELEASE_URL="file://$root/release"
-  unset FAKE_FIREWALL FAKE_PAIRS
+  unset FAKE_FIREWALL FAKE_PAIRS FAKE_IFACE FAKE_SUDO_FAILS
   mkdir -p "$HOME" "$FAKE"
   out="$dir/out" status=0 shown=""
   rules_file="$HOME/.local/state/soloist-mpris/firewall-rules"
@@ -193,11 +197,24 @@ wait_for() { # file text: up to 30 seconds
 answer() { # question reply
   if ! wait_for "$out" "$1"; then
     fail "never asked: $1"
+    return 1
+  fi
+  printf '%s\n' "$2" >&3
+}
+# A hidden reply waits until the terminal stops echoing, as a person would
+# only type once the question is there.
+answer_secret() { # question reply
+  if ! wait_for "$out" "$1"; then
+    fail "never asked: $1"
     return 0
   fi
-  # Lets read(1) switch off echo before the reply arrives.
-  sleep 0.3
-  printf '%s\n' "$2" >&3
+  local tty i
+  tty=$(ps -o tty= -p "$(cat "$FAKE/pid")" | tr -d ' ')
+  for ((i = 0; i < 300; i++)); do
+    stty -a -F "/dev/$tty" 2>/dev/null | grep -qw -- -echo && break
+    sleep 0.1
+  done
+  answer "$1" "$2"
 }
 finish() {
   local i
@@ -233,7 +250,7 @@ printf 'waiting for login\n' >"$FAKE/journal"
 # The user's own rule, which must outlive the install.
 printf 'allow in from 192.168.7.0/24 to any port 5353 proto udp\n' >"$FAKE/ufw"
 SOLOIST_DEVICE_NAME=Desk start_tty
-answer "Paste the key" typed-secret-key
+answer_secret "Paste the key" typed-secret-key
 answer "Open it for 192.168.7.0/24 only while you pair" y
 finish
 ((status == 0)) || fail "exit $status"
@@ -255,6 +272,17 @@ finish
 ((status == 0)) || fail "exit $status"
 expect_in "$out" 'Paired. "Desk" is ready'
 expect_in "$FAKE/calls" "--zone=home --add-rich-rule=rule family=ipv4 source address=192.168.7.0/24 port port=5353 protocol=udp accept"
+expect_lines "$FAKE/firewalld" 0
+
+scenario "without a zone on the interface, firewalld rules go to the default zone"
+with_key
+export FAKE_FIREWALL=firewalld FAKE_PAIRS=1 FAKE_IFACE=wlan0
+printf 'waiting for login\n' >"$FAKE/journal"
+start_tty
+answer "Open it for 192.168.7.0/24 only while you pair" y
+finish
+((status == 0)) || fail "exit $status"
+expect_in "$FAKE/calls" "--zone=public --add-rich-rule=rule family=ipv4 source address=192.168.7.0/24 port port=34323 protocol=tcp accept"
 expect_lines "$FAKE/firewalld" 0
 
 scenario "rules a killed installer left open are closed by --uninstall"
@@ -282,6 +310,35 @@ printf 'allow in from 192.168.7.0/24 to any port 34323 proto tcp\n' >"$FAKE/ufw"
 run_detached
 ((status == 0)) || fail "exit $status"
 expect_in "$out" "interrupted install"
+expect_lines "$FAKE/ufw" 0
+[[ ! -e $rules_file ]] || fail "the record of open rules was kept"
+
+scenario "left-over rules that cannot be removed stay recorded, and odd lines are ignored"
+with_key
+touch "$FAKE/paired"
+mkdir -p "${rules_file%/*}"
+printf 'home\trule family=ipv4 source address=192.168.7.0/24 port port=5353 protocol=udp accept\n' >"$FAKE/firewalld"
+printf 'allow in from 192.168.7.0/24 to any port 34323 proto tcp\n' >"$FAKE/ufw"
+# A firewalld rule, a line nobody should pass to sudo, and a ufw rule whose
+# newline was lost.
+printf '%s\n%s\n%s' \
+  $'firewalld\thome\trule family=ipv4 source address=192.168.7.0/24 port port=5353 protocol=udp accept' \
+  $'ufw\t-\tallow in from 0.0.0.0/0 to any port 22 proto tcp; touch /tmp/pwned' \
+  $'ufw\t-\tallow in from 192.168.7.0/24 to any port 34323 proto tcp' >"$rules_file"
+export FAKE_SUDO_FAILS=1
+run_detached
+((status == 0)) || fail "exit $status"
+expect_in "$out" "remove it with: sudo firewall-cmd --zone=home --remove-rich-rule="
+expect_in "$out" "remove it with: sudo ufw delete allow in from 192.168.7.0/24 to any port 34323 proto tcp"
+expect_in "$out" "Ignoring a line this installer did not write"
+expect_not_in "$FAKE/calls" "pwned" "an unexpected line reached sudo"
+[[ $(grep -c 'remove it with' "$out") == 2 ]] || fail "the hints were not printed once each"
+expect_lines "$rules_file" 2
+unset FAKE_SUDO_FAILS
+run_detached --uninstall
+((status == 0)) || fail "uninstall exit $status"
+expect_in "$FAKE/calls" "sudo firewall-cmd --quiet --zone=home --remove-rich-rule=rule family=ipv4"
+expect_lines "$FAKE/firewalld" 0
 expect_lines "$FAKE/ufw" 0
 [[ ! -e $rules_file ]] || fail "the record of open rules was kept"
 

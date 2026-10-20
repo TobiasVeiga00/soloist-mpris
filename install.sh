@@ -99,8 +99,7 @@ retry_key() {
   fi
   note "Spotify rejected the API key."
   ask_key
-  local reopen=""
-  [[ -s $opened ]] && reopen=1
+  local reopen="$opened_now"
   close_firewall
   restart_soloist
   if [[ -n $reopen ]]; then
@@ -125,9 +124,12 @@ find_port() {
 #
 # Each added rule is recorded in a file (tool, firewalld zone or -, rule) so
 # that one left open by a killed installer is closed by the next run or by
-# --uninstall.
+# --uninstall. Those runs check every line against the rules written here
+# before handing it to sudo.
 firewall="" zone="-" dev="" subnet="" port=""
-opened="$state/firewall-rules"
+opened="$state/firewall-rules" opened_now=""
+ufw_rule='^allow in from [0-9./]+ to any port [0-9]+ proto (tcp|udp)$'
+firewalld_rule='^rule family=ipv4 source address=[0-9./]+ port port=[0-9]+ protocol=(tcp|udp) accept$'
 open_firewall() {
   local rules=() rule
   case $firewall in
@@ -141,34 +143,52 @@ open_firewall() {
              "rule family=ipv4 source address=$subnet port port=$port protocol=tcp accept") ;;
   esac
   mkdir -p "$state"
-  local out
+  local out record
   for rule in "${rules[@]}"; do
+    record="$firewall"$'\t'"$zone"$'\t'"$rule"
     # shellcheck disable=SC2086 # the rule is ufw's own words
     case $firewall in
       ufw)
+        # ufw only tells whether the rule was already there once it runs, so
+        # the record follows: recording first could later delete a rule the
+        # user had.
         out=$(sudo ufw $rule 2>&1) || return 1
-        [[ $out != *Skipping* ]] || continue ;;
+        [[ $out != *Skipping* ]] || continue
+        printf '%s\n' "$record" >>"$opened"
+        opened_now=1 ;;
       firewalld)
         ! sudo firewall-cmd --quiet --zone="$zone" --query-rich-rule="$rule" 2>/dev/null || continue
+        printf '%s\n' "$record" >>"$opened"
+        opened_now=1
         sudo firewall-cmd --quiet --zone="$zone" --add-rich-rule="$rule" || return 1 ;;
     esac
-    printf '%s\t%s\t%s\n' "$firewall" "$zone" "$rule" >>"$opened"
   done
 }
-close_firewall() { # [message]
+close_firewall() { # [--left-over]: closes what this run opened, or what a killed run left
   [[ -s $opened ]] || return 0
-  note "${1:-Closing the firewall again.}"
-  local tool rule_zone rule hint left=""
-  while IFS=$'\t' read -r -u 3 tool rule_zone rule; do
-    # shellcheck disable=SC2086 # the rule is ufw's own words
+  if [[ ${1:-} == --left-over ]]; then
+    note "An interrupted install left the firewall open while pairing; closing it."
+  else
+    [[ -n $opened_now ]] || return 0
+    note "Closing the firewall again."
+  fi
+  opened_now=""
+  local tool rule_zone rule words hint left=""
+  # The last line may lack its newline in a hand-edited file.
+  while IFS=$'\t' read -r -u 3 tool rule_zone rule || [[ -n $tool ]]; do
+    if ! { [[ $tool == ufw && $rule =~ $ufw_rule ]] ||
+           [[ $tool == firewalld && $rule_zone =~ ^[A-Za-z0-9_-]+$ && $rule =~ $firewalld_rule ]]; }; then
+      note "Ignoring a line this installer did not write in $opened"
+      continue
+    fi
     case $tool in
       ufw)
-        if sudo ufw delete $rule >/dev/null; then continue; fi
+        read -ra words <<<"$rule"
+        if sudo ufw delete "${words[@]}" >/dev/null; then continue; fi
         hint="sudo ufw delete $rule" ;;
       firewalld)
         if sudo firewall-cmd --quiet --zone="$rule_zone" --remove-rich-rule="$rule"; then continue; fi
         hint="sudo firewall-cmd --zone=$rule_zone --remove-rich-rule='$rule'" ;;
-      *) continue ;;
     esac
     note "Could not remove a firewall rule; remove it with: $hint"
     left+="$tool"$'\t'"$rule_zone"$'\t'"$rule"$'\n'
@@ -183,7 +203,7 @@ close_firewall() { # [message]
 
 download() { # file of the release, into the work directory
   curl --fail --location --silent --show-error -o "$work/$1" "$release/$1" ||
-    die "could not download $1 from $release; a release published in the last few minutes may still be uploading its files, so try again in a few minutes"
+    die "could not download $1 from $release (see the error above); if that release came out in the last few minutes, its files may still be uploading, so try again in a few minutes"
 }
 
 cleanup() {
@@ -199,7 +219,7 @@ main() {
     [[ -f $here/packaging/systemd/soloist.service ]] || here=""
   fi
 
-  close_firewall "An interrupted install left the firewall open while pairing; closing it."
+  close_firewall --left-over
 
   if [[ ${1:-} == --uninstall ]]; then
     local unit

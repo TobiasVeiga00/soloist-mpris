@@ -42,9 +42,11 @@ jobs:
 
   # The one-line install fetches the installer from the same release. It goes
   # up after every archive, so a piped install never runs before the archive
-  # it downloads is there.
+  # it downloads is there; it still goes up when one architecture failed, so
+  # the others keep installing and that one gets the installer's clear error.
   installer:
     needs: build
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

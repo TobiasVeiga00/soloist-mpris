@@ -8,10 +8,11 @@ on:
   schedule:
     - cron: "23 7 * * 1"
   workflow_dispatch:
+  # Only a change to this check runs it on a pull request: it tests Spotify's
+  # build, not the pull request, and must not block one when Spotify's CDN
+  # does not answer.
   pull_request:
     paths:
-      - install.sh
-      - packaging/soloist-update
       - .github/workflows/soloist-lines.yml
 
 permissions:
