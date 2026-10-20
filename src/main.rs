@@ -11,6 +11,7 @@ mod resume;
 mod state;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -375,8 +376,14 @@ impl Memory {
         let Ok(json) = serde_json::to_vec(&saved) else {
             return;
         };
-        // Written aside and renamed, so a crash never leaves half a file.
-        let partial = self.path.with_extension("json.partial");
+        // Written aside and renamed, so a crash never leaves half a file. A
+        // SIGTERM can land while a save is under way and start another, so
+        // every save writes its own partial file.
+        static SAVES: AtomicU64 = AtomicU64::new(0);
+        let save = SAVES.fetch_add(1, Ordering::Relaxed);
+        let partial = self
+            .path
+            .with_extension(format!("json.{}.{save}.partial", std::process::id()));
         let written = async {
             if let Some(parent) = self.path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
