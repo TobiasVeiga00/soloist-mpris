@@ -54,7 +54,9 @@ pub fn commands(saved: Option<&Saved>, state: &State, boot_id: &str, now_ms: i64
         return Vec::new();
     };
     let recent = (0..=WINDOW_MS).contains(&(now_ms - saved.at_ms));
-    if !saved.active || saved.boot_id != boot_id || !recent || !state.logged_in || !state.inactive {
+    // An unknown boot id cannot tell a restart from a reboot: never resume.
+    let same_boot = !boot_id.is_empty() && saved.boot_id == boot_id;
+    if !saved.active || !same_boot || !recent || !state.logged_in || !state.inactive {
         return Vec::new();
     }
     let command = |name: &str| json!({ "type": "command", "command": name });
@@ -191,6 +193,14 @@ mod tests {
         assert!(
             commands(None, &back_inactive(), BOOT, now).is_empty(),
             "nothing saved"
+        );
+        let unknown = Saved {
+            boot_id: String::new(),
+            ..before.clone()
+        };
+        assert!(
+            commands(Some(&unknown), &back_inactive(), "", now).is_empty(),
+            "without a boot id a reboot cannot be told apart"
         );
     }
 }
