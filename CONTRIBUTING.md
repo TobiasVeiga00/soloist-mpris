@@ -23,6 +23,7 @@ cargo fmt --all
 bash -n install.sh packaging/soloist-update bench/measure.sh tests/installer.sh
 shellcheck install.sh packaging/soloist-update bench/measure.sh tests/installer.sh
 tests/installer.sh                           # install.sh end to end, against fakes
+cargo deny check advisories                  # RustSec advisories (needs cargo-deny)
 ```
 
 The logic lives in three pure modules with their tests:
@@ -50,7 +51,8 @@ playerctl -p soloist metadata
   messages (`fix:`, `feat:`, `docs:` ...).
 - Update the README when installation, configuration or behaviour changes.
 - Never commit a Soloist binary, an API key, or logs that contain one.
-- CI (format, clippy, tests, script syntax) must pass. CodeRabbit reviews
-  every pull request; its comments are suggestions, a maintainer decides.
+- CI (format, clippy, tests, script syntax, and a RustSec audit when the
+  dependencies change) must pass. CodeRabbit reviews every pull request; its
+  comments are suggestions, a maintainer decides.
 
 By contributing you agree that your work is released under the MIT License.
