@@ -6,6 +6,7 @@
 //! it. Soloist must run with `--ws 127.0.0.1:0`; the bridge finds the port in
 //! Soloist's data directory and reconnects whenever Soloist restarts.
 
+mod cli;
 mod command;
 mod resume;
 mod state;
@@ -29,6 +30,8 @@ use command::Request;
 use state::{Changes, Repeat, State, Status};
 
 const RETRY: Duration = Duration::from_secs(2);
+/// The well-known name the bridge publishes the player under.
+const BUS_NAME: &str = "org.mpris.MediaPlayer2.soloist";
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -462,6 +465,35 @@ async fn follow(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> zbus::Result<()> {
+    match cli::parse(std::env::args().skip(1)) {
+        cli::Cli::Run => {}
+        cli::Cli::Help => {
+            println!("{}", cli::USAGE);
+            return Ok(());
+        }
+        cli::Cli::Version => {
+            println!("soloist-mpris {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        cli::Cli::Unknown(arg) => {
+            eprintln!("soloist-mpris: unknown argument {arg}\n\n{}", cli::USAGE);
+            std::process::exit(2);
+        }
+    }
+    // A second bridge would take the player's name from the running one and
+    // leave the desktop without a player when it exits.
+    let session = zbus::Connection::session().await?;
+    let name = zbus::names::BusName::try_from(BUS_NAME)?;
+    if zbus::fdo::DBusProxy::new(&session)
+        .await?
+        .name_has_owner(name)
+        .await?
+    {
+        eprintln!("soloist-mpris: {BUS_NAME} already has a bridge; not starting another");
+        std::process::exit(1);
+    }
+    drop(session);
+
     let (sender, mut commands) = mpsc::unbounded_channel();
     let state = Arc::new(Mutex::new(State::default()));
     let server = Server::new(
