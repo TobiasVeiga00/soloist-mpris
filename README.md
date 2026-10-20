@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/TobiasVeiga00/soloist-mpris)](https://github.com/TobiasVeiga00/soloist-mpris/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Spotify on Linux in about 65 MB of RAM, with your bar, media keys and `playerctl` working.**
+**Spotify on Linux in about 60 MB of RAM, with your bar, media keys and `playerctl` working.**
 
 Spotify's desktop app is a whole Chromium browser running one web page. In
 2026 Spotify released [Soloist](https://developer.spotify.com/blog/2026-08-13-introducing-spotify-soloist),
@@ -25,6 +25,9 @@ This kit fixes that. It installs Soloist, keeps it updated, and adds
   any other MPRIS client get the title, artist, album, cover art and progress.
 - **Media keys and `playerctl` work**: play/pause, next, previous, seek,
   volume, shuffle and repeat.
+- **15x lighter than the desktop app.** About 60 MB of RAM and 3% of one
+  core while playing, against more than 900 MB for Spotify's app
+  ([benchmark](#how-light-is-it)).
 - **Official playback.** Soloist is Spotify's own player, so it is not affected
   by the [audio key refusals](https://github.com/librespot-org/librespot/issues/1649)
   that stop librespot-based clients on many accounts.
@@ -33,17 +36,26 @@ This kit fixes that. It installs Soloist, keeps it updated, and adds
 
 ## How light is it?
 
-Measured on a ThinkPad T480 (i5-8350U) while playing music:
+Same laptop (ThinkPad T480, i5-8350U, Arch Linux), same song, 60 seconds of
+playback each, measured with [`bench/measure.sh`](bench/measure.sh):
 
-| Process | RAM (PSS) | CPU |
-| --- | --- | --- |
-| `soloist` (playing) | 45 MB | about 4% of one core |
-| Soloist's crash reporter | 14 MB | idle |
-| `soloist-mpris` | 6 MB | idle between events |
-| **Total** | **about 65 MB** | |
+| | RAM (PSS) | CPU (one core) | Installed size |
+| --- | --- | --- | --- |
+| **Soloist + soloist-mpris** | **61 MB** | **3%** | **40 MB** |
+| Spotify desktop app, window hidden | 922 MB | 10% | 387 MB |
+| Spotify desktop app, window open | 943 MB | 27% | 387 MB |
 
-There is no browser engine anywhere in it, so nothing renders, animates or
-runs JavaScript in the background.
+That is **15 times less memory** and less than a third of the CPU, even when
+the official app sits hidden in the background. The desktop app is a Chromium
+browser showing Spotify's web page, spread over 9 processes.
+Here, three small processes play the music and nothing renders at all.
+
+Run the same measurement on your machine while music plays:
+
+```sh
+bench/measure.sh '^(soloist|soloist-mpris)$' 60   # this kit
+bench/measure.sh '^spotify$' 60                   # the desktop app
+```
 
 ## Choosing what to play
 
