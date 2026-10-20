@@ -129,6 +129,18 @@ journalctl --user -u soloist -u soloist-mpris -f
 To change the name phones see, add `SOLOIST_DEVICE_NAME=Living room` to
 `~/.config/soloist/env` and restart `soloist`.
 
+## Troubleshooting
+
+- **Your phone does not see the computer.** Put both on the same network and
+  run the installer again: it walks you through pairing.
+- **Spotifast says "Spotify refused the audio key".** Spotifast tried to play
+  by itself. Pick this computer in its devices menu instead, and do not use
+  **Set up playback here**. If you already did: sign out of Spotifast, quit it,
+  set `"playback_authorized": false` in `~/.config/spotifast/settings.json` and
+  sign in again.
+- **Spotifast shows "Nothing playing" while music plays.** In Spotifast's
+  Settings, under Account, choose **Authorize your personal app** again.
+
 ## Uninstall
 
 ```sh
