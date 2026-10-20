@@ -267,7 +267,10 @@ main() {
       return 0
     fi
     if key_rejected; then
-      ((attempts < 2)) || break
+      if ((attempts >= 2)); then
+        close_firewall
+        die "Spotify rejected the API key three times; generate a new one at $dashboard and run the installer again"
+      fi
       attempts=$((attempts + 1))
       retry_key
       deadline=$(($(date +%s) + pair_minutes * 60))

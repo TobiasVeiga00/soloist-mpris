@@ -18,8 +18,11 @@ reviews:
         blocks the async runtime.
     - path: "install.sh"
       instructions: >-
-        Everything must stay under the user's home directory and never need
-        root. The API key must never be echoed, logged or world-readable.
+        Everything must stay under the user's home directory. The only root
+        use allowed is the optional, consented sudo for the temporary
+        firewall rules while pairing, scoped to the local subnet and removed
+        afterwards. The API key must never be echoed, logged or
+        world-readable.
     - path: "packaging/**"
       instructions: >-
         Soloist is only ever downloaded from Spotify's CDN, never bundled.
