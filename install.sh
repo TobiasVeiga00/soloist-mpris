@@ -83,15 +83,42 @@ restart_soloist() {
   systemctl --user restart soloist.service
 }
 
+# Asks for a new key after Spotify rejects one; the third rejection ends the
+# install. Soloist listens on a new port after the restart, so open firewall
+# rules follow it.
+rejections=0
+max_rejections=3
 retry_key() {
+  rejections=$((rejections + 1))
+  if ((rejections >= max_rejections)); then
+    close_firewall
+    die "Spotify rejected the API key $max_rejections times; generate a new one at $dashboard and run the installer again"
+  fi
   note "Spotify rejected the API key."
   ask_key
+  local reopen=""
+  ((${#opened[@]})) && reopen=1
+  close_firewall
   restart_soloist
+  if [[ -n $reopen ]]; then
+    { find_port && open_firewall; } || note "Could not open the firewall again; your phone may not find this computer."
+  fi
+}
+
+# Soloist's discovery port, which changes on every start.
+find_port() {
+  local i
+  for ((i = 0; i < 10; i++)); do
+    port=$(ss -tlnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ { n = split($4, a, ":"); print a[n]; exit }') || true
+    [[ -n $port ]] && return 0
+    sleep 1
+  done
+  return 1
 }
 
 # Discovery needs mDNS (5353/udp) and Soloist's own TCP port, from the local
-# network only. Every rule that went in is taken out again, even if a later
-# one failed.
+# network only. Every rule this script added is taken out again, even if a
+# later one failed; a rule that was already there is left alone.
 firewall="" subnet="" port=""
 opened=()
 open_firewall() {
@@ -102,11 +129,16 @@ open_firewall() {
     firewalld) rules=("rule family=ipv4 source address=$subnet port port=5353 protocol=udp accept"
                       "rule family=ipv4 source address=$subnet port port=$port protocol=tcp accept") ;;
   esac
+  local out
   for rule in "${rules[@]}"; do
     # shellcheck disable=SC2086 # the rule is ufw's own words
     case $firewall in
-      ufw) sudo ufw $rule >/dev/null || return 1 ;;
-      firewalld) sudo firewall-cmd --quiet --add-rich-rule="$rule" || return 1 ;;
+      ufw)
+        out=$(sudo ufw $rule 2>&1) || return 1
+        [[ $out != *Skipping* ]] || continue ;;
+      firewalld)
+        ! sudo firewall-cmd --quiet --query-rich-rule="$rule" 2>/dev/null || continue
+        sudo firewall-cmd --quiet --add-rich-rule="$rule" || return 1 ;;
     esac
     opened+=("$rule")
   done
@@ -118,8 +150,10 @@ close_firewall() {
   for rule in "${opened[@]}"; do
     # shellcheck disable=SC2086 # the rule is ufw's own words
     case $firewall in
-      ufw) sudo ufw delete $rule >/dev/null || true ;;
-      firewalld) sudo firewall-cmd --quiet --remove-rich-rule="$rule" || true ;;
+      ufw) sudo ufw delete $rule >/dev/null ||
+             note "Could not remove a firewall rule; remove it with: sudo ufw delete $rule" ;;
+      firewalld) sudo firewall-cmd --quiet --remove-rich-rule="$rule" ||
+                   note "Could not remove a firewall rule; remove it with: sudo firewall-cmd --remove-rich-rule='$rule'" ;;
     esac
   done
   opened=()
@@ -245,10 +279,9 @@ main() {
   systemctl is-active --quiet firewalld 2>/dev/null && firewall=firewalld
   if [[ -n $firewall ]]; then
     local dev reply
-    dev=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
-    subnet=$(ip -4 route show dev "$dev" proto kernel scope link 2>/dev/null | awk '{print $1; exit}')
-    port=$(ss -tlnpH 2>/dev/null | awk '/"soloist"/ && $4 !~ /^127\./ { n = split($4, a, ":"); print a[n]; exit }')
-    if [[ -n $subnet && -n $port ]]; then
+    dev=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}') || true
+    subnet=$(ip -4 route show dev "$dev" proto kernel scope link 2>/dev/null | awk '{print $1; exit}') || true
+    if [[ -n $subnet ]] && find_port; then
       note "Your firewall ($firewall) blocks the phone from finding this computer."
       reply=$(ask "  Open it for $subnet only while you pair, then close it? [Y/n] ")
       if [[ ! $reply =~ ^[Nn] ]]; then
@@ -257,7 +290,7 @@ main() {
     fi
   fi
 
-  local attempts=0 deadline
+  local deadline
   deadline=$(($(date +%s) + pair_minutes * 60))
   note "Now $pair_hint. Waiting up to $pair_minutes minutes..."
   while (($(date +%s) < deadline)); do
@@ -267,11 +300,6 @@ main() {
       return 0
     fi
     if key_rejected; then
-      if ((attempts >= 2)); then
-        close_firewall
-        die "Spotify rejected the API key three times; generate a new one at $dashboard and run the installer again"
-      fi
-      attempts=$((attempts + 1))
       retry_key
       deadline=$(($(date +%s) + pair_minutes * 60))
       note "Now $pair_hint again. Waiting up to $pair_minutes minutes..."
@@ -280,6 +308,9 @@ main() {
     sleep 2
   done
   close_firewall
+  if ! systemctl --user is-active --quiet soloist.service; then
+    die "Soloist is not running; see journalctl --user -u soloist"
+  fi
   say "Not paired yet. Soloist keeps running: pick \"$name\" on your phone whenever you like,"
   say "or run the installer again to be walked through it."
 }
